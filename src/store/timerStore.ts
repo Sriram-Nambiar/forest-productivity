@@ -1,7 +1,7 @@
-import { create } from 'zustand';
-import { STORAGE_KEYS } from '../constants';
-import { safeGetItem, safeSetItem, safeRemoveItem } from '../utils/storage';
-import type { TimerStatus, ActiveSession } from '../utils/types';
+import { create } from "zustand";
+import { STORAGE_KEYS } from "../constants";
+import { safeGetItem, safeRemoveItem, safeSetItem } from "../utils/storage";
+import type { ActiveSession, TimerStatus } from "../utils/types";
 
 interface TimerState {
   durationMinutes: number;
@@ -26,25 +26,30 @@ interface TimerState {
 export const useTimerStore = create<TimerState>((set, get) => ({
   durationMinutes: 25,
   remainingSeconds: 25 * 60,
-  status: 'idle',
+  status: "idle",
   startTime: null,
   pausedAt: null,
 
   setDuration: (minutes: number) => {
     const state = get();
-    if (state.status !== 'idle') return;
+    // ✅ FIX: Allow changing duration when idle, completed, or failed
+    if (state.status === "running" || state.status === "paused") return;
     set({
       durationMinutes: minutes,
       remainingSeconds: minutes * 60,
+      // Reset to idle so startTimer works
+      status: "idle",
+      startTime: null,
+      pausedAt: null,
     });
   },
 
   startTimer: () => {
     const state = get();
-    if (state.status !== 'idle') return;
+    if (state.status !== "idle") return;
     const now = Date.now();
     set({
-      status: 'running',
+      status: "running",
       startTime: now,
       remainingSeconds: state.durationMinutes * 60,
       pausedAt: null,
@@ -53,44 +58,44 @@ export const useTimerStore = create<TimerState>((set, get) => ({
 
   pauseTimer: () => {
     const state = get();
-    if (state.status !== 'running') return;
+    if (state.status !== "running") return;
     set({
-      status: 'paused',
+      status: "paused",
       pausedAt: Date.now(),
     });
   },
 
   resumeTimer: () => {
     const state = get();
-    if (state.status !== 'paused') return;
+    if (state.status !== "paused") return;
     set({
-      status: 'running',
+      status: "running",
       pausedAt: null,
     });
   },
 
   tick: () => {
     const state = get();
-    if (state.status !== 'running') return;
+    if (state.status !== "running") return;
     const newRemaining = Math.max(0, state.remainingSeconds - 1);
     set({ remainingSeconds: newRemaining });
   },
 
   completeTimer: () => {
     set({
-      status: 'completed',
+      status: "completed",
       remainingSeconds: 0,
     });
   },
 
   failTimer: () => {
-    set({ status: 'failed' });
+    set({ status: "failed" });
   },
 
   resetTimer: () => {
     const state = get();
     set({
-      status: 'idle',
+      status: "idle",
       remainingSeconds: state.durationMinutes * 60,
       startTime: null,
       pausedAt: null,
@@ -99,9 +104,9 @@ export const useTimerStore = create<TimerState>((set, get) => ({
 
   restoreSession: async () => {
     const saved = await safeGetItem<ActiveSession>(STORAGE_KEYS.ACTIVE_SESSION);
-    if (!saved || typeof saved !== 'object') return false;
+    if (!saved || typeof saved !== "object") return false;
 
-    if (saved.status === 'running' || saved.status === 'paused') {
+    if (saved.status === "running" || saved.status === "paused") {
       const elapsed = Math.floor((Date.now() - saved.startTime) / 1000);
       const totalSeconds = saved.durationMinutes * 60;
       const remaining = Math.max(0, totalSeconds - elapsed);
@@ -115,25 +120,25 @@ export const useTimerStore = create<TimerState>((set, get) => ({
         durationMinutes: saved.durationMinutes,
         remainingSeconds: remaining,
         startTime: saved.startTime,
-        status: 'paused',
+        status: "paused",
         pausedAt: Date.now(),
       });
       return true;
     }
+
     return false;
   },
 
   persistSession: async () => {
     const state = get();
-    if (state.status === 'idle' || state.status === 'completed' || state.status === 'failed') return;
-    const session: ActiveSession = {
+    const data: ActiveSession = {
       durationMinutes: state.durationMinutes,
       remainingSeconds: state.remainingSeconds,
       startTime: state.startTime ?? Date.now(),
       status: state.status,
       pausedAt: state.pausedAt,
     };
-    await safeSetItem(STORAGE_KEYS.ACTIVE_SESSION, session);
+    await safeSetItem(STORAGE_KEYS.ACTIVE_SESSION, data);
   },
 
   clearPersistedSession: async () => {
