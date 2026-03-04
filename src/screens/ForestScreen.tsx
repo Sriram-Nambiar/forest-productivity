@@ -1,11 +1,14 @@
 import React, { useCallback, useEffect } from 'react';
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { AnalyticsTabs } from '../components/forest/AnalyticsTabs';
+import { ForestCanvas } from '../components/forest/ForestCanvas';
+import { ForestStats } from '../components/forest/ForestStats';
+import { SessionCalendar } from '../components/forest/SessionCalendar';
+import { TimeDistributionChart } from '../components/forest/TimeDistributionChart';
 import { COLORS } from '../constants';
 import { useSessionStore } from '../store/sessionStore';
 import { useSettingsStore } from '../store/settingsStore';
-import { SessionCard } from '../components/SessionCard';
-import type { FocusSession } from '../utils/types';
 
 export default function ForestScreen() {
   const { sessions, loadSessions, clearSessions } = useSessionStore();
@@ -30,35 +33,9 @@ export default function ForestScreen() {
     );
   }, [clearSessions]);
 
-  const completedCount = sessions.filter((s) => s.status === 'completed').length;
-  const failedCount = sessions.filter((s) => s.status === 'failed').length;
-
-  const renderItem = useCallback(
-    ({ item }: { item: FocusSession }) => (
-      <SessionCard session={item} darkMode={darkMode} />
-    ),
-    [darkMode],
-  );
-
-  const keyExtractor = useCallback((item: FocusSession) => item.id, []);
-
-  const ListEmptyComponent = useCallback(
-    () => (
-      <View style={styles.emptyContainer}>
-        <Text style={styles.emptyEmoji}>🌱</Text>
-        <Text style={[styles.emptyTitle, darkMode && styles.textDark]}>
-          No trees yet
-        </Text>
-        <Text style={[styles.emptySubtitle, darkMode && styles.subtextDark]}>
-          Complete a focus session to grow your forest
-        </Text>
-      </View>
-    ),
-    [darkMode],
-  );
-
   return (
     <SafeAreaView style={[styles.container, darkMode && styles.containerDark]} edges={['top']}>
+      {/* Header */}
       <View style={styles.header}>
         <Text style={[styles.title, darkMode && styles.titleDark]}>My Forest</Text>
         {sessions.length > 0 && (
@@ -68,35 +45,39 @@ export default function ForestScreen() {
         )}
       </View>
 
-      {sessions.length > 0 && (
-        <View style={styles.stats}>
-          <View style={[styles.statCard, darkMode && styles.statCardDark]}>
-            <Text style={styles.statEmoji}>🌳</Text>
-            <Text style={[styles.statValue, darkMode && styles.textDark]}>{completedCount}</Text>
-            <Text style={[styles.statLabel, darkMode && styles.subtextDark]}>Grown</Text>
-          </View>
-          <View style={[styles.statCard, darkMode && styles.statCardDark]}>
-            <Text style={styles.statEmoji}>🥀</Text>
-            <Text style={[styles.statValue, darkMode && styles.textDark]}>{failedCount}</Text>
-            <Text style={[styles.statLabel, darkMode && styles.subtextDark]}>Died</Text>
-          </View>
-          <View style={[styles.statCard, darkMode && styles.statCardDark]}>
-            <Text style={styles.statEmoji}>🌲</Text>
-            <Text style={[styles.statValue, darkMode && styles.textDark]}>{sessions.length}</Text>
-            <Text style={[styles.statLabel, darkMode && styles.subtextDark]}>Total</Text>
-          </View>
-        </View>
-      )}
-
-      <FlatList
-        data={sessions}
-        renderItem={renderItem}
-        keyExtractor={keyExtractor}
-        numColumns={3}
-        contentContainerStyle={styles.listContent}
-        ListEmptyComponent={ListEmptyComponent}
+      <ScrollView
         showsVerticalScrollIndicator={false}
-      />
+        contentContainerStyle={styles.scrollContent}
+      >
+        {/* Section 1: Forest Visualization */}
+        <ForestCanvas sessions={sessions} darkMode={darkMode} />
+
+        {/* Section 2: Session Stats */}
+        <View style={styles.section}>
+          <ForestStats sessions={sessions} darkMode={darkMode} />
+        </View>
+
+        {/* Section 3: Time Distribution */}
+        {sessions.filter((s) => s.status === 'completed').length > 0 && (
+          <View style={styles.section}>
+            <TimeDistributionChart sessions={sessions} darkMode={darkMode} />
+          </View>
+        )}
+
+        {/* Section 4: Productivity Analytics */}
+        {sessions.filter((s) => s.status === 'completed').length > 0 && (
+          <View style={styles.section}>
+            <AnalyticsTabs sessions={sessions} darkMode={darkMode} />
+          </View>
+        )}
+
+        {/* Section 5: Calendar */}
+        <View style={styles.section}>
+          <SessionCalendar sessions={sessions} darkMode={darkMode} />
+        </View>
+
+        <View style={styles.bottomPadding} />
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -129,71 +110,13 @@ const styles = StyleSheet.create({
     color: COLORS.error,
     fontWeight: '600',
   },
-  stats: {
-    flexDirection: 'row',
-    paddingHorizontal: 16,
-    marginBottom: 16,
-    gap: 8,
+  scrollContent: {
+    paddingTop: 4,
   },
-  statCard: {
-    flex: 1,
-    backgroundColor: COLORS.surface,
-    borderRadius: 12,
-    padding: 12,
-    alignItems: 'center',
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
+  section: {
+    marginTop: 16,
   },
-  statCardDark: {
-    backgroundColor: COLORS.surfaceDark,
-  },
-  statEmoji: {
-    fontSize: 20,
-    marginBottom: 4,
-  },
-  statValue: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: COLORS.text,
-  },
-  textDark: {
-    color: COLORS.textDark,
-  },
-  statLabel: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-  },
-  subtextDark: {
-    color: COLORS.textSecondaryDark,
-  },
-  listContent: {
-    paddingHorizontal: 12,
-    paddingBottom: 24,
-    flexGrow: 1,
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 80,
-  },
-  emptyEmoji: {
-    fontSize: 64,
-    marginBottom: 16,
-  },
-  emptyTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: COLORS.text,
-    marginBottom: 8,
-  },
-  emptySubtitle: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    textAlign: 'center',
-    paddingHorizontal: 40,
+  bottomPadding: {
+    height: 40,
   },
 });
