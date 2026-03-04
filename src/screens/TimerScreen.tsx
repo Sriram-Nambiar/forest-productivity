@@ -1,14 +1,14 @@
 import React, { useCallback, useEffect } from 'react';
-import { View, Text, StyleSheet, Alert } from 'react-native';
+import { Alert, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { COLORS, STATE_RESET_DELAY_MS } from '../constants';
-import { formatTime } from '../utils/helpers';
-import { useTimerStore } from '../store/timerStore';
-import { useSettingsStore } from '../store/settingsStore';
-import { useFocusTimer } from '../hooks/useFocusTimer';
-import { TreeAnimation } from '../components/TreeAnimation';
 import { DurationSelector } from '../components/DurationSelector';
 import { TimerControls } from '../components/TimerControls';
+import { TreeGrowthAnimation } from '../components/TreeGrowthAnimation';
+import { COLORS, STATE_RESET_DELAY_MS } from '../constants';
+import { useFocusTimer } from '../hooks/useFocusTimer';
+import { useSettingsStore } from '../store/settingsStore';
+import { useTimerStore } from '../store/timerStore';
+import { formatTime } from '../utils/helpers';
 
 export default function TimerScreen() {
   const {
@@ -93,9 +93,8 @@ export default function TimerScreen() {
         />
 
         <View style={styles.treeContainer}>
-          <TreeAnimation
+          <TreeGrowthAnimation
             progress={progress}
-            stage={treeStage}
             failed={status === 'failed'}
           />
         </View>
@@ -145,7 +144,7 @@ const styles = StyleSheet.create({
     color: COLORS.primaryLight,
   },
   treeContainer: {
-    marginVertical: 16,
+    marginVertical: 8,
   },
   timer: {
     fontSize: 56,
