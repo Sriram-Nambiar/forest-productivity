@@ -1,119 +1,199 @@
-# 🌲 Forest Focus
+🌲 Forest Focus
 
-A gamified productivity app built with **React Native (Expo)** for the
-**Seeker Mobile Phone** at the **Monolith Hackathon**.
+A gamified productivity app built with React Native (Expo) for the
+Seeker Mobile Phone at the Monolith Hackathon.
 
-Stay focused. Grow your forest.\
+Stay focused. Grow your forest.
 Get distracted. Watch it die.
 
----
-
-## 🚀 Overview
+🚀 Overview
 
 Forest Focus is a minimal, distraction-aware productivity app where:
 
-- 🌱 A tree grows when you stay focused
-- 🥀 The tree dies if you switch apps or leave the session
-- 📊 Your focus history builds a visual forest
+🌱 A tree grows when you stay focused
+
+🥀 The tree dies if you switch apps or leave the session
+
+🌲 Your focus history builds a visual forest
+
+📊 Your productivity is analyzed with charts and analytics
 
 Instead of tracking boring streaks, the app visualizes your productivity
-as a growing (or dying) forest.
+as a living forest that evolves over time.
 
----
+✨ Features
+⏳ Focus Timer
 
-## ✨ Features
+15m, 25m, 45m presets
 
-### ⏳ Focus Timer
+Custom duration option
 
-- 15m, 25m, 45m presets
-- Custom duration option
-- Live countdown
-- Pause option
-- Give Up option
-- Visual growth indicator
+Live countdown
 
----
+Pause option
 
-### 🌲 Gamified Focus System
+Give Up option
 
-- Tree grows during active focus session
-- Tree dies if user switches apps or gets distracted
-- Real consequence-driven productivity
+Visual tree growth animation during focus session
 
----
+🌲 Gamified Focus System
 
-### 📊 My Forest Dashboard
+Tree grows during active focus session
 
-- 🌳 Trees Grown
-- 🥀 Trees Died
-- 🌲 Total Sessions
-- Session history with timestamps
-- Clear/reset forest option
+Tree dies if user switches apps or gets distracted
 
----
+Real consequence-driven productivity
 
-### 🌗 Theming
+Visual seed → roots → trunk → branches → leaves growth
 
-- Light Mode
-- Dark Mode
-- Clean forest-inspired green aesthetic
-- Minimal and distraction-free UI
+🌳 3D Forest Visualization
 
----
+Your completed sessions grow trees inside a large dynamic forest.
 
-### 👛 Solana Wallet Integration
+Every completed session plants a tree
 
-- Integrated Solana wallet support
-- Built for Web3-native mobile experience
-- Wallet screen included for future reward/token mechanics
-- Foundation for on-chain incentives & focus rewards
+Trees are positioned across the forest landscape
 
----
+Depth scaling creates a 3D forest illusion
 
-## 🛠 Tech Stack
+Forest gradually fills as productivity increases
 
-- React Native
-- Expo
-- Solana Wallet Integration
-- JavaScript / TypeScript
-- Async Storage
+Your focus history becomes a living ecosystem of productivity.
 
----
+📊 My Forest Dashboard
 
-## 📱 Built For
+The Forest screen contains a full analytics dashboard.
 
-- Seeker Mobile Phone
-- Monolith Hackathon
+🌲 Forest Overview
 
----
+Visual forest containing all grown trees
 
-## 🧠 Concept
+Each tree represents a completed session
+
+📈 Session Statistics
+
+🌳 Trees Grown
+
+🥀 Trees Died
+
+⏱ Total Focus Time
+
+📊 Average Session Duration
+
+📊 Focus Analytics
+
+The app provides insights into your productivity patterns.
+
+Time Distribution Chart
+
+Focus time is displayed across different periods of the day:
+
+🌅 Morning
+
+☀️ Afternoon
+
+🌆 Evening
+
+🌙 Night
+
+This helps users understand when they are most productive.
+
+📅 Productivity Analytics
+
+Users can analyze productivity across different time ranges.
+
+Switch between:
+
+📅 Day
+
+📆 Week
+
+🗓 Month
+
+📊 Year
+
+Each view updates charts to show how productivity evolves over time.
+
+🗓 Focus Calendar
+
+A calendar view highlights days when focus sessions occurred.
+
+Days with completed sessions are marked
+
+Allows easy tracking of productivity streaks
+
+Helps visualize long-term consistency
+
+🌗 Theming
+
+Light Mode
+
+Dark Mode
+
+Clean forest-inspired green aesthetic
+
+Minimal and distraction-free UI
+
+👛 Solana Wallet Integration
+
+Integrated Solana wallet support
+
+Built for Web3-native mobile experience
+
+Wallet screen included for future reward/token mechanics
+
+Foundation for on-chain incentives & focus rewards
+
+🛠 Tech Stack
+
+React Native
+
+Expo
+
+React Native SVG
+
+React Native Reanimated
+
+Solana Wallet Integration
+
+JavaScript / TypeScript
+
+Async Storage
+
+📱 Built For
+
+Seeker Mobile Phone
+
+Monolith Hackathon
+
+🧠 Concept
 
 Most productivity apps track time.
 
 Forest Focus tracks consequences.
 
-If you stay in the app → your tree grows.\
+If you stay in the app → your tree grows.
 If you leave → your tree dies.
+
+Over time your focus sessions create a visual forest representing your productivity journey.
 
 Behavioral design meets minimal UX.
 
----
+🔮 Future Improvements
 
-## 🔮 Future Improvements
+On-chain rewards for completed sessions
 
-- On-chain rewards for completed sessions
-- NFT-based forest trees
-- Streak multipliers
-- Community focus rooms
-- Real productivity analytics
-- Tokenized accountability system
+NFT-based forest trees
 
----
+Streak multipliers
 
-## ⚙️ Installation
+Community focus rooms
 
-```bash
+Real productivity analytics
+
+Tokenized accountability system
+
+⚙️ Installation
 # Clone the repo
 git clone https://github.com/your-username/forest-focus.git
 
@@ -125,17 +205,12 @@ npm install
 
 # Start Expo
 npx expo start
-```
+🙏 Acknowledgements
 
----
+Special thanks to Blunt Brain for guidance and conceptual refinement during development.
 
-## 🙏 Acknowledgements
-
-Special thanks to **Blunt Brain** for guidance and conceptual refinement
-during development.
-
----
-
-## 📜 License
+📜 License
 
 MIT License
+
+If you want, I can also help you add sections for screenshots and demo GIFs, which will make your GitHub README look much more impressive and professional.
