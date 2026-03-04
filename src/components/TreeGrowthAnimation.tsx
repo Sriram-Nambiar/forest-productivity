@@ -4,6 +4,7 @@ import Animated, {
     Easing,
     Extrapolation,
     interpolate,
+    SharedValue,
     useAnimatedProps,
     useSharedValue,
     withTiming,
@@ -44,7 +45,7 @@ const TIMING_CONFIG = {
   easing: Easing.bezier(0.25, 0.1, 0.25, 1),
 };
 
-// ─── Root paths (drawn from soil downward) ───
+// ─── Root paths ───
 const ROOT_PATHS = [
   'M120 230 Q110 250 95 265',
   'M120 230 Q120 255 120 270',
@@ -55,39 +56,35 @@ const ROOT_PATHS = [
 
 // ─── Branch definitions ───
 const BRANCHES = [
-  // Left branches
-  { x1: 120, y1: 165, x2: 80, y2: 140 },
-  { x1: 120, y1: 185, x2: 75, y2: 170 },
-  { x1: 120, y1: 150, x2: 85, y2: 120 },
-  // Right branches
+  { x1: 120, y1: 165, x2: 80,  y2: 140 },
+  { x1: 120, y1: 185, x2: 75,  y2: 170 },
+  { x1: 120, y1: 150, x2: 85,  y2: 120 },
   { x1: 120, y1: 160, x2: 160, y2: 135 },
   { x1: 120, y1: 180, x2: 165, y2: 165 },
   { x1: 120, y1: 145, x2: 155, y2: 115 },
 ];
 
-// ─── Leaf clusters (cx, cy, r, color-index) ───
+// ─── Leaf clusters ───
 const LEAVES: Array<{ cx: number; cy: number; r: number; colorIdx: number }> = [
-  // Top canopy
-  { cx: 120, cy: 90, r: 18, colorIdx: 0 },
+  { cx: 120, cy: 90,  r: 18, colorIdx: 0 },
   { cx: 100, cy: 100, r: 15, colorIdx: 1 },
   { cx: 140, cy: 100, r: 15, colorIdx: 1 },
-  { cx: 120, cy: 75, r: 14, colorIdx: 2 },
-  // Mid canopy
-  { cx: 85, cy: 120, r: 16, colorIdx: 1 },
+  { cx: 120, cy: 75,  r: 14, colorIdx: 2 },
+  { cx: 85,  cy: 120, r: 16, colorIdx: 1 },
   { cx: 155, cy: 115, r: 16, colorIdx: 1 },
   { cx: 105, cy: 110, r: 14, colorIdx: 0 },
   { cx: 135, cy: 108, r: 14, colorIdx: 0 },
-  // Outer canopy
-  { cx: 75, cy: 135, r: 13, colorIdx: 2 },
+  { cx: 75,  cy: 135, r: 13, colorIdx: 2 },
   { cx: 165, cy: 130, r: 13, colorIdx: 2 },
-  { cx: 80, cy: 148, r: 11, colorIdx: 0 },
+  { cx: 80,  cy: 148, r: 11, colorIdx: 0 },
   { cx: 160, cy: 145, r: 11, colorIdx: 0 },
-  // Lower fill
-  { cx: 95, cy: 142, r: 12, colorIdx: 1 },
+  { cx: 95,  cy: 142, r: 12, colorIdx: 1 },
   { cx: 145, cy: 140, r: 12, colorIdx: 1 },
   { cx: 110, cy: 125, r: 10, colorIdx: 2 },
   { cx: 130, cy: 123, r: 10, colorIdx: 2 },
 ];
+
+const ROOT_TOTAL_LENGTH = 60;
 
 function getLeafColor(idx: number, dead: boolean): string {
   if (dead) return DEAD_LEAF;
@@ -99,8 +96,98 @@ function getLeafColor(idx: number, dead: boolean): string {
   }
 }
 
-// ─── Measure total length for dash animation ───
-const ROOT_TOTAL_LENGTH = 60; // approximate per-path
+// ─── Sub-components to avoid hooks-in-loops violation ───
+
+interface RootPathProps {
+  d: string;
+  index: number;
+  animProgress: SharedValue<number>;
+  color: string;
+}
+
+const RootPath = memo(function RootPath({ d, index, animProgress, color }: RootPathProps) {
+  const animatedProps = useAnimatedProps(() => {
+    const p = animProgress.value;
+    const startAt = 0.05 + index * 0.02;
+    const endAt = startAt + 0.12;
+    const draw = interpolate(p, [startAt, endAt], [0, 1], Extrapolation.CLAMP);
+    const offset = ROOT_TOTAL_LENGTH * (1 - draw);
+    const opacity = interpolate(p, [startAt, startAt + 0.01], [0, 1], Extrapolation.CLAMP);
+    return { strokeDashoffset: offset, opacity };
+  });
+
+  return (
+    <AnimatedPath
+      d={d}
+      stroke={color}
+      strokeWidth={2.5}
+      strokeLinecap="round"
+      fill="none"
+      strokeDasharray={`${ROOT_TOTAL_LENGTH},${ROOT_TOTAL_LENGTH}`}
+      animatedProps={animatedProps}
+    />
+  );
+});
+
+interface BranchLineProps {
+  branch: typeof BRANCHES[number];
+  index: number;
+  animProgress: SharedValue<number>;
+  color: string;
+}
+
+const BranchLine = memo(function BranchLine({ branch, index, animProgress, color }: BranchLineProps) {
+  const animatedProps = useAnimatedProps(() => {
+    const p = animProgress.value;
+    const startAt = 0.4 + index * 0.03;
+    const endAt = startAt + 0.15;
+    const draw = interpolate(p, [startAt, endAt], [0, 1], Extrapolation.CLAMP);
+    const opacity = interpolate(p, [startAt, startAt + 0.02], [0, 1], Extrapolation.CLAMP);
+    const bx = interpolate(draw, [0, 1], [branch.x1, branch.x2], Extrapolation.CLAMP);
+    const by = interpolate(draw, [0, 1], [branch.y1, branch.y2], Extrapolation.CLAMP);
+    return { x2: bx, y2: by, opacity };
+  });
+
+  return (
+    <AnimatedLine
+      x1={branch.x1}
+      y1={branch.y1}
+      animatedProps={animatedProps}
+      stroke={color}
+      strokeWidth={2.5}
+      strokeLinecap="round"
+    />
+  );
+});
+
+interface LeafCircleProps {
+  leaf: typeof LEAVES[number];
+  index: number;
+  animProgress: SharedValue<number>;
+  failed: boolean;
+}
+
+const LeafCircle = memo(function LeafCircle({ leaf, index, animProgress, failed }: LeafCircleProps) {
+  const animatedProps = useAnimatedProps(() => {
+    const p = animProgress.value;
+    const startAt = 0.55 + index * 0.025;
+    const endAt = startAt + 0.2;
+    const scale = interpolate(p, [startAt, endAt], [0, 1], Extrapolation.CLAMP);
+    const opacity = interpolate(p, [startAt, startAt + 0.05], [0, 0.9], Extrapolation.CLAMP);
+    return { r: leaf.r * scale, opacity };
+  });
+
+  return (
+    <AnimatedCircle
+      cx={leaf.cx}
+      cy={leaf.cy}
+      fill={getLeafColor(leaf.colorIdx, failed)}
+      animatedProps={animatedProps}
+    />
+  );
+});
+
+// ─── Main component ───
 
 interface TreeGrowthAnimationProps {
   progress: number; // 0 → 1
@@ -125,7 +212,7 @@ const TreeGrowthAnimation = memo(function TreeGrowthAnimation({
     return { opacity, transform: [{ scale }] };
   });
 
-  // ─── Ground line ───
+  // ─── Ground ───
   const groundProps = useAnimatedProps(() => {
     const p = animProgress.value;
     const scaleX = interpolate(p, [0, 0.05, 1], [0.3, 0.6, 1], Extrapolation.CLAMP);
@@ -133,29 +220,13 @@ const TreeGrowthAnimation = memo(function TreeGrowthAnimation({
     return { opacity, transform: [{ scaleX }] };
   });
 
-  // ─── Roots (stroke dash offset) ───
-  const rootPropsList = ROOT_PATHS.map((_, i) => {
-    // eslint-disable-next-line react-hooks/rules-of-hooks
-    return useAnimatedProps(() => {
-      const p = animProgress.value;
-      const startAt = 0.05 + i * 0.02;
-      const endAt = startAt + 0.12;
-      const draw = interpolate(p, [startAt, endAt], [0, 1], Extrapolation.CLAMP);
-      const offset = ROOT_TOTAL_LENGTH * (1 - draw);
-      const opacity = interpolate(p, [startAt, startAt + 0.01], [0, 1], Extrapolation.CLAMP);
-      return {
-        strokeDashoffset: offset,
-        opacity,
-      };
-    });
-  });
-
   // ─── Trunk ───
   const trunkProps = useAnimatedProps(() => {
     const p = animProgress.value;
     const trunkMaxH = 90;
     const trunkH = interpolate(p, [0.15, 0.4], [0, trunkMaxH], Extrapolation.CLAMP);
-    const trunkW = interpolate(p, [0.15, 0.4], [4, 16], Extrapolation.CLAMP);
+    // Slimmer trunk: max width reduced from 16 → 10
+    const trunkW = interpolate(p, [0.15, 0.4], [3, 10], Extrapolation.CLAMP);
     const opacity = interpolate(p, [0.14, 0.16], [0, 1], Extrapolation.CLAMP);
     return {
       y: 230 - trunkH,
@@ -167,64 +238,19 @@ const TreeGrowthAnimation = memo(function TreeGrowthAnimation({
     };
   });
 
-  // ─── Branches ───
-  const branchPropsList = BRANCHES.map((branch, i) => {
-    // eslint-disable-next-line react-hooks/rules-of-hooks
-    return useAnimatedProps(() => {
-      const p = animProgress.value;
-      const startAt = 0.4 + i * 0.03;
-      const endAt = startAt + 0.15;
-      const draw = interpolate(p, [startAt, endAt], [0, 1], Extrapolation.CLAMP);
-      const opacity = interpolate(p, [startAt, startAt + 0.02], [0, 1], Extrapolation.CLAMP);
-      const bx = interpolate(draw, [0, 1], [branch.x1, branch.x2], Extrapolation.CLAMP);
-      const by = interpolate(draw, [0, 1], [branch.y1, branch.y2], Extrapolation.CLAMP);
-      return {
-        x2: bx,
-        y2: by,
-        opacity,
-      };
-    });
-  });
-
-  // ─── Leaves ───
-  const leafPropsList = LEAVES.map((_, i) => {
-    // eslint-disable-next-line react-hooks/rules-of-hooks
-    return useAnimatedProps(() => {
-      const p = animProgress.value;
-      const startAt = 0.55 + i * 0.025;
-      const endAt = startAt + 0.2;
-      const scale = interpolate(p, [startAt, endAt], [0, 1], Extrapolation.CLAMP);
-      const opacity = interpolate(p, [startAt, startAt + 0.05], [0, 0.9], Extrapolation.CLAMP);
-      return {
-        r: LEAVES[i].r * scale,
-        opacity,
-      };
-    });
-  });
-
-  const seedColor = failed ? DEAD_SEED : ALIVE_SEED;
+  const seedColor  = failed ? DEAD_SEED   : ALIVE_SEED;
   const groundColor = failed ? DEAD_GROUND : ALIVE_GROUND;
-  const rootColor = failed ? DEAD_ROOT : ALIVE_ROOT;
-  const trunkColor = failed ? DEAD_TRUNK : ALIVE_TRUNK;
+  const rootColor  = failed ? DEAD_ROOT   : ALIVE_ROOT;
+  const trunkColor = failed ? DEAD_TRUNK  : ALIVE_TRUNK;
   const branchColor = failed ? DEAD_BRANCH : ALIVE_BRANCH;
 
   return (
     <View style={styles.container}>
-      <Svg
-        width={SVG_W}
-        height={SVG_H}
-        viewBox={`0 0 ${SVG_W} ${SVG_H}`}
-      >
+      <Svg width={SVG_W} height={SVG_H} viewBox={`0 0 ${SVG_W} ${SVG_H}`}>
+
         {/* ── Ground ── */}
         <AnimatedG animatedProps={groundProps} origin={`${SVG_W / 2}, 230`}>
-          <Rect
-            x={40}
-            y={228}
-            width={160}
-            height={5}
-            rx={2.5}
-            fill={groundColor}
-          />
+          <Rect x={40} y={228} width={160} height={5} rx={2.5} fill={groundColor} />
         </AnimatedG>
 
         {/* ── Seed ── */}
@@ -235,47 +261,40 @@ const TreeGrowthAnimation = memo(function TreeGrowthAnimation({
 
         {/* ── Roots ── */}
         {ROOT_PATHS.map((d, i) => (
-          <AnimatedPath
+          <RootPath
             key={`root-${i}`}
             d={d}
-            stroke={rootColor}
-            strokeWidth={2.5}
-            strokeLinecap="round"
-            fill="none"
-            strokeDasharray={`${ROOT_TOTAL_LENGTH},${ROOT_TOTAL_LENGTH}`}
-            animatedProps={rootPropsList[i]}
+            index={i}
+            animProgress={animProgress}
+            color={rootColor}
           />
         ))}
 
         {/* ── Trunk ── */}
-        <AnimatedRect
-          animatedProps={trunkProps}
-          fill={trunkColor}
-        />
+        <AnimatedRect animatedProps={trunkProps} fill={trunkColor} />
 
         {/* ── Branches ── */}
         {BRANCHES.map((branch, i) => (
-          <AnimatedLine
+          <BranchLine
             key={`branch-${i}`}
-            x1={branch.x1}
-            y1={branch.y1}
-            animatedProps={branchPropsList[i]}
-            stroke={branchColor}
-            strokeWidth={3}
-            strokeLinecap="round"
+            branch={branch}
+            index={i}
+            animProgress={animProgress}
+            color={branchColor}
           />
         ))}
 
         {/* ── Leaves ── */}
         {LEAVES.map((leaf, i) => (
-          <AnimatedCircle
+          <LeafCircle
             key={`leaf-${i}`}
-            cx={leaf.cx}
-            cy={leaf.cy}
-            fill={getLeafColor(leaf.colorIdx, failed)}
-            animatedProps={leafPropsList[i]}
+            leaf={leaf}
+            index={i}
+            animProgress={animProgress}
+            failed={failed}
           />
         ))}
+
       </Svg>
     </View>
   );
@@ -291,3 +310,4 @@ const styles = StyleSheet.create({
 });
 
 export { TreeGrowthAnimation };
+
