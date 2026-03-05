@@ -1,13 +1,14 @@
-import { useEffect, useRef, useCallback } from 'react';
-import { AppState, type AppStateStatus } from 'react-native';
-import * as Haptics from 'expo-haptics';
-import * as Notifications from 'expo-notifications';
-import { TIMER_INTERVAL_MS, GRACE_PERIOD_MS } from '../constants';
-import { useTimerStore } from '../store/timerStore';
-import { useSessionStore } from '../store/sessionStore';
-import { useSettingsStore } from '../store/settingsStore';
-import { generateId, getTreeStage, getProgress } from '../utils/helpers';
-import type { FocusSession } from '../utils/types';
+import * as Haptics from "expo-haptics";
+import * as Notifications from "expo-notifications";
+import { useCallback, useEffect, useRef } from "react";
+import { AppState, type AppStateStatus } from "react-native";
+import { GRACE_PERIOD_MS, TIMER_INTERVAL_MS } from "../constants";
+import { useLevelStore } from "../store/levelStore"; // ← ADD
+import { useSessionStore } from "../store/sessionStore";
+import { useSettingsStore } from "../store/settingsStore";
+import { useTimerStore } from "../store/timerStore";
+import { generateId, getProgress, getTreeStage } from "../utils/helpers";
+import type { FocusSession } from "../utils/types";
 
 export function useFocusTimer() {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -29,6 +30,7 @@ export function useFocusTimer() {
   const addSession = useSessionStore((s) => s.addSession);
   const strictMode = useSettingsStore((s) => s.strictMode);
   const notificationsEnabled = useSettingsStore((s) => s.notificationsEnabled);
+  const addPoints = useLevelStore((s) => s.addPoints); // ← ADD
 
   const totalSeconds = durationMinutes * 60;
   const progress = getProgress(remainingSeconds, totalSeconds);
@@ -49,7 +51,7 @@ export function useFocusTimer() {
   }, []);
 
   const saveSession = useCallback(
-    async (sessionStatus: 'completed' | 'failed') => {
+    async (sessionStatus: "completed" | "failed") => {
       const timerState = useTimerStore.getState();
       const session: FocusSession = {
         id: generateId(),
@@ -57,7 +59,8 @@ export function useFocusTimer() {
         startTime: timerState.startTime ?? Date.now(),
         endTime: Date.now(),
         status: sessionStatus,
-        treeStage: sessionStatus === 'completed' ? 'full' : getTreeStage(progress),
+        treeStage:
+          sessionStatus === "completed" ? "full" : getTreeStage(progress),
       };
       await addSession(session);
       await clearPersistedSession();
@@ -79,7 +82,7 @@ export function useFocusTimer() {
       try {
         await Notifications.scheduleNotificationAsync({
           content: {
-            title: 'Focus Complete! 🌳',
+            title: "Focus Complete! 🌳",
             body: `Great job! Your ${durationMinutes}-minute focus session is complete.`,
           },
           trigger: null,
@@ -89,8 +92,16 @@ export function useFocusTimer() {
       }
     }
 
-    await saveSession('completed');
-  }, [clearInterval_, completeTimer, notificationsEnabled, durationMinutes, saveSession]);
+    await saveSession("completed");
+    await addPoints(durationMinutes); // ← ADD THIS LINE
+  }, [
+    clearInterval_,
+    completeTimer,
+    notificationsEnabled,
+    durationMinutes,
+    saveSession,
+    addPoints,
+  ]);
 
   const handleFail = useCallback(async () => {
     clearInterval_();
@@ -103,12 +114,12 @@ export function useFocusTimer() {
       // Haptics not available
     }
 
-    await saveSession('failed');
+    await saveSession("failed");
   }, [clearInterval_, clearGrace, failTimer, saveSession]);
 
   // Timer interval
   useEffect(() => {
-    if (status === 'running') {
+    if (status === "running") {
       intervalRef.current = setInterval(() => {
         const state = useTimerStore.getState();
         if (state.remainingSeconds <= 1) {
@@ -126,37 +137,50 @@ export function useFocusTimer() {
 
   // Persist session periodically
   useEffect(() => {
-    if (status === 'running' || status === 'paused') {
+    if (status === "running" || status === "paused") {
       persistSession();
     }
   }, [status, remainingSeconds, persistSession]);
 
   // AppState listener for distraction detection
   useEffect(() => {
-    const subscription = AppState.addEventListener('change', (nextState: AppStateStatus) => {
-      const prevState = appStateRef.current;
-      appStateRef.current = nextState;
+    const subscription = AppState.addEventListener(
+      "change",
+      (nextState: AppStateStatus) => {
+        const prevState = appStateRef.current;
+        appStateRef.current = nextState;
 
-      const timerState = useTimerStore.getState();
-      if (timerState.status !== 'running' && timerState.status !== 'paused') return;
+        const timerState = useTimerStore.getState();
+        if (timerState.status !== "running" && timerState.status !== "paused")
+          return;
 
-      if (prevState === 'active' && (nextState === 'background' || nextState === 'inactive')) {
-        if (timerState.status === 'running') {
-          if (strictMode) {
-            handleFail();
-          } else {
-            graceRef.current = setTimeout(() => {
-              const currentState = useTimerStore.getState();
-              if (currentState.status === 'running' || currentState.status === 'paused') {
-                handleFail();
-              }
-            }, GRACE_PERIOD_MS);
+        if (
+          prevState === "active" &&
+          (nextState === "background" || nextState === "inactive")
+        ) {
+          if (timerState.status === "running") {
+            if (strictMode) {
+              handleFail();
+            } else {
+              graceRef.current = setTimeout(() => {
+                const currentState = useTimerStore.getState();
+                if (
+                  currentState.status === "running" ||
+                  currentState.status === "paused"
+                ) {
+                  handleFail();
+                }
+              }, GRACE_PERIOD_MS);
+            }
           }
+        } else if (
+          nextState === "active" &&
+          (prevState === "background" || prevState === "inactive")
+        ) {
+          clearGrace();
         }
-      } else if (nextState === 'active' && (prevState === 'background' || prevState === 'inactive')) {
-        clearGrace();
-      }
-    });
+      },
+    );
 
     return () => {
       subscription.remove();
