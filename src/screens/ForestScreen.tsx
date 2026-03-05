@@ -2,8 +2,10 @@ import React, { useCallback, useEffect } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AnalyticsTabs } from '../components/forest/AnalyticsTabs';
+import { DailyFocusRing } from '../components/forest/DailyFocusRing';
 import { ForestCanvas } from '../components/forest/ForestCanvas';
 import { ForestStats } from '../components/forest/ForestStats';
+import { LevelCard } from '../components/forest/LevelCard';
 import { SessionCalendar } from '../components/forest/SessionCalendar';
 import { TimeDistributionChart } from '../components/forest/TimeDistributionChart';
 import { COLORS } from '../constants';
@@ -33,6 +35,8 @@ export default function ForestScreen() {
     );
   }, [clearSessions]);
 
+  const hasCompleted = sessions.filter((s) => s.status === 'completed').length > 0;
+
   return (
     <SafeAreaView style={[styles.container, darkMode && styles.containerDark]} edges={['top']}>
       {/* Header */}
@@ -49,29 +53,39 @@ export default function ForestScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
-        {/* Section 1: Forest Visualization */}
-        <ForestCanvas sessions={sessions} darkMode={darkMode} />
+        {/* 1. Level + Points Card */}
+        <LevelCard darkMode={darkMode} />
 
-        {/* Section 2: Session Stats */}
+        {/* 2. Daily Focus Completion Circle */}
+        <View style={styles.section}>
+          <DailyFocusRing sessions={sessions} darkMode={darkMode} />
+        </View>
+
+        {/* 3. Forest Visualization */}
+        <View style={styles.section}>
+          <ForestCanvas sessions={sessions} darkMode={darkMode} />
+        </View>
+
+        {/* 4. Session Statistics */}
         <View style={styles.section}>
           <ForestStats sessions={sessions} darkMode={darkMode} />
         </View>
 
-        {/* Section 3: Time Distribution */}
-        {sessions.filter((s) => s.status === 'completed').length > 0 && (
+        {/* 5. Time Distribution Chart */}
+        {hasCompleted && (
           <View style={styles.section}>
             <TimeDistributionChart sessions={sessions} darkMode={darkMode} />
           </View>
         )}
 
-        {/* Section 4: Productivity Analytics */}
-        {sessions.filter((s) => s.status === 'completed').length > 0 && (
+        {/* 6. Productivity Analytics Tabs */}
+        {hasCompleted && (
           <View style={styles.section}>
             <AnalyticsTabs sessions={sessions} darkMode={darkMode} />
           </View>
         )}
 
-        {/* Section 5: Calendar */}
+        {/* 7. Calendar */}
         <View style={styles.section}>
           <SessionCalendar sessions={sessions} darkMode={darkMode} />
         </View>
