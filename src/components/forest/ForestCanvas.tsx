@@ -10,7 +10,7 @@ interface ForestCanvasProps {
 }
 
 const SCREEN_W = Dimensions.get('window').width;
-const CANVAS_W = SCREEN_W - 32; // horizontal padding
+const CANVAS_W = SCREEN_W - 32;
 const ROW_SPACING = 55;
 const TREES_PER_ROW = 6;
 
@@ -19,51 +19,59 @@ interface PlacedTree {
   x: number;
   y: number;
   scale: number;
-  failed: boolean;
+  isDead: boolean;
 }
 
 function computePlacements(sessions: FocusSession[]): PlacedTree[] {
   const trees: PlacedTree[] = [];
+  let treeIndex = 0;
+
   for (let i = 0; i < sessions.length; i++) {
     const s = sessions[i];
-    if (s.status !== 'completed') continue;
+    // Include BOTH completed AND failed sessions
+    if (s.status !== 'completed' && s.status !== 'failed') continue;
 
-    const col = i % TREES_PER_ROW;
-    const row = Math.floor(i / TREES_PER_ROW);
+    const col = treeIndex % TREES_PER_ROW;
+    const row = Math.floor(treeIndex / TREES_PER_ROW);
 
-    // Deterministic "random" offset for natural look
-    const seed = ((i * 73 + 37) % 97) / 97;
+    const seed = ((treeIndex * 73 + 37) % 97) / 97;
     const xJitter = (seed - 0.5) * 20;
     const yJitter = ((seed * 53) % 1) * 10;
 
     const x = (col / TREES_PER_ROW) * CANVAS_W + xJitter + 10;
     const y = row * ROW_SPACING + yJitter;
 
-    // Depth effect: back rows are smaller
-    const maxRows = Math.max(1, Math.ceil(sessions.length / TREES_PER_ROW));
+    const totalTrees = sessions.filter(
+      (ss) => ss.status === 'completed' || ss.status === 'failed',
+    ).length;
+    const maxRows = Math.max(1, Math.ceil(totalTrees / TREES_PER_ROW));
     const depthRatio = maxRows > 1 ? row / (maxRows - 1) : 0.5;
-    const scale = 0.7 + (1 - depthRatio) * 0.4; // front=1.1, back=0.7
+    const scale = 0.7 + (1 - depthRatio) * 0.4;
 
     trees.push({
       key: s.id,
       x: Math.max(0, Math.min(x, CANVAS_W - 60)),
       y,
       scale,
-      failed: false,
+      isDead: s.status === 'failed',                               // ← KEY CHANGE
     });
+
+    treeIndex++;
   }
   return trees;
 }
 
 const ForestCanvas = memo(function ForestCanvas({ sessions, darkMode }: ForestCanvasProps) {
   const placements = useMemo(() => computePlacements(sessions), [sessions]);
-  const completedCount = placements.length;
+  const completedCount = sessions.filter((s) => s.status === 'completed').length;
+  const failedCount = sessions.filter((s) => s.status === 'failed').length;
+  const totalTrees = placements.length;
   const canvasHeight = Math.max(
     200,
-    Math.ceil(completedCount / TREES_PER_ROW) * ROW_SPACING + 80,
+    Math.ceil(totalTrees / TREES_PER_ROW) * ROW_SPACING + 80,
   );
 
-  if (completedCount === 0) {
+  if (totalTrees === 0) {
     return (
       <View style={[styles.emptyCanvas, darkMode && styles.emptyCanvasDark]}>
         <Text style={styles.emptyEmoji}>🌱</Text>
@@ -79,7 +87,6 @@ const ForestCanvas = memo(function ForestCanvas({ sessions, darkMode }: ForestCa
 
   return (
     <View style={[styles.canvas, darkMode && styles.canvasDark, { height: canvasHeight }]}>
-      {/* Ground gradient effect */}
       <View style={[styles.ground, darkMode && styles.groundDark]} />
 
       {placements.map((tree) => (
@@ -94,13 +101,16 @@ const ForestCanvas = memo(function ForestCanvas({ sessions, darkMode }: ForestCa
             },
           ]}
         >
-          <ForestTree scale={tree.scale} failed={tree.failed} />
+          <ForestTree scale={tree.scale} isDead={tree.isDead} />
         </View>
       ))}
 
-      {/* Tree count badge */}
+      {/* Tree count badges */}
       <View style={[styles.countBadge, darkMode && styles.countBadgeDark]}>
         <Text style={styles.countText}>🌳 {completedCount}</Text>
+        {failedCount > 0 && (
+          <Text style={[styles.countText, { marginLeft: 8 }]}>🥀 {failedCount}</Text>
+        )}
       </View>
     </View>
   );
@@ -141,6 +151,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 10,
     paddingVertical: 4,
+    flexDirection: 'row',
   },
   countBadgeDark: {
     backgroundColor: 'rgba(76,175,80,0.3)',
