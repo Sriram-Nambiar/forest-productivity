@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { DurationSelector } from '../components/DurationSelector';
 import { TimerControls } from '../components/TimerControls';
 import { TreeGrowthAnimation } from '../components/TreeGrowthAnimation';
+import { ProgressRing } from '../components/timer/ProgressRing'; // ← ADD
 import { COLORS, STATE_RESET_DELAY_MS } from '../constants';
 import { useFocusTimer } from '../hooks/useFocusTimer';
 import { useSettingsStore } from '../store/settingsStore';
@@ -80,6 +81,14 @@ export default function TimerScreen() {
     }
   })();
 
+  // ─── Determine ring color based on status ───
+  const ringColor =
+    status === 'failed'
+      ? COLORS.error
+      : status === 'completed'
+        ? COLORS.success
+        : COLORS.primaryLight;
+
   return (
     <SafeAreaView style={[styles.container, darkMode && styles.containerDark]} edges={['top']}>
       <View style={styles.content}>
@@ -92,7 +101,15 @@ export default function TimerScreen() {
           darkMode={darkMode}
         />
 
+        {/* ── Tree + Progress Ring ── */}
         <View style={styles.treeContainer}>
+          <ProgressRing
+            progress={progress}
+            size={260}
+            strokeWidth={6}
+            progressColor={ringColor}
+            trackColor={darkMode ? 'rgba(76,175,80,0.1)' : 'rgba(76,175,80,0.15)'}
+          />
           <TreeGrowthAnimation
             progress={progress}
             failed={status === 'failed'}
@@ -145,6 +162,10 @@ const styles = StyleSheet.create({
   },
   treeContainer: {
     marginVertical: 8,
+    width: 260,                    // ← matches ring size
+    height: 280,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   timer: {
     fontSize: 56,
