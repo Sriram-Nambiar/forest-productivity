@@ -23,8 +23,8 @@ const SVG_W = 240;
 const SVG_H = 280;
 
 // ─── Colors ───
-const ALIVE_TRUNK = '#6D4C41';
-const ALIVE_BRANCH = '#795548';
+const ALIVE_TRUNK = '#69463c';
+const ALIVE_BRANCH = '#795546';
 const ALIVE_LEAF_DARK = '#2E7D32';
 const ALIVE_LEAF_MID = '#4CAF50';
 const ALIVE_LEAF_LIGHT = '#81C784';
