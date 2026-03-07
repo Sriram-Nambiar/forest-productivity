@@ -1,5 +1,18 @@
-// Node.js polyfills required for @solana/web3.js in React Native
-import 'react-native-get-random-values';
-import { Buffer } from 'buffer';
+import { Buffer } from "buffer";
+import { getRandomValues as expoCryptoGetRandomValues } from "expo-crypto";
 
 global.Buffer = global.Buffer || Buffer;
+
+class Crypto {
+  getRandomValues = expoCryptoGetRandomValues;
+}
+
+const webCrypto = typeof crypto !== "undefined" ? crypto : new Crypto();
+
+if (typeof crypto === "undefined") {
+  Object.defineProperty(globalThis, "crypto", {
+    configurable: true,
+    enumerable: true,
+    get: () => webCrypto,
+  });
+}
