@@ -4,7 +4,6 @@ import { DEFAULT_CLUSTER, type SolanaCluster } from "../solana/config";
 import { safeGetItem, safeSetItem } from "../utils/storage";
 
 interface WalletState {
-  isDevnet: any;
   /** Base58-encoded public key (null when disconnected) */
   publicKey: string | null;
   /** Currently selected Solana cluster */
@@ -26,7 +25,6 @@ interface WalletState {
 }
 
 export const useWalletStore = create<WalletState>((set, get) => ({
-  isDevnet: false,
   publicKey: null,
   cluster: DEFAULT_CLUSTER,
   connecting: false,

@@ -1,16 +1,16 @@
-import { useState, useCallback } from "react";
 import {
   transact,
   Web3MobileWallet,
 } from "@solana-mobile/mobile-wallet-adapter-protocol-web3js";
 import {
-  Connection,
-  PublicKey,
-  Transaction,
-  SystemProgram,
-  LAMPORTS_PER_SOL,
   clusterApiUrl,
+  Connection,
+  LAMPORTS_PER_SOL,
+  PublicKey,
+  SystemProgram,
+  Transaction,
 } from "@solana/web3.js";
+import { useCallback, useState } from "react";
 import { useWalletStore } from "../store/walletStore";
 
 const APP_IDENTITY = {
@@ -34,21 +34,19 @@ export function useWallet() {
   const connect = useCallback(async () => {
     setConnecting(true);
     try {
-      const authResult = await transact(
-        async (wallet: Web3MobileWallet) => {
-          // This opens Phantom, shows an "Authorize" dialog
-          // User taps "Approve" → we get their public key
-          const result = await wallet.authorize({
-            chain: `solana:${cluster}`,
-            identity: APP_IDENTITY,
-          });
-          return result;
-        }
-      );
+      const authResult = await transact(async (wallet: Web3MobileWallet) => {
+        // This opens Phantom, shows an "Authorize" dialog
+        // User taps "Approve" → we get their public key
+        const result = await wallet.authorize({
+          chain: `solana:${cluster}`,
+          identity: APP_IDENTITY,
+        });
+        return result;
+      });
 
       // authResult.accounts[0].address is a base64 public key
       const pubkey = new PublicKey(
-        Buffer.from(authResult.accounts[0].address, "base64")
+        Buffer.from(authResult.accounts[0].address, "base64"),
       );
       setPublicKey(pubkey);
       return pubkey;
@@ -92,7 +90,7 @@ export function useWallet() {
             fromPubkey: publicKey,
             toPubkey: toPublicKey,
             lamports: Math.round(amountSOL * LAMPORTS_PER_SOL),
-          })
+          }),
         );
 
         // Step 2: Get recent blockhash (needed for transaction)
@@ -101,30 +99,28 @@ export function useWallet() {
         transaction.feePayer = publicKey;
 
         // Step 3: Send to Phantom for signing + submission
-        const txSignature = await transact(
-          async (wallet: Web3MobileWallet) => {
-            // Re-authorize (Phantom needs this each session)
-            await wallet.authorize({
-              chain: `solana:${cluster}`,
-              identity: APP_IDENTITY,
-            });
+        const txSignature = await transact(async (wallet: Web3MobileWallet) => {
+          // Re-authorize (Phantom needs this each session)
+          await wallet.authorize({
+            chain: `solana:${cluster}`,
+            identity: APP_IDENTITY,
+          });
 
-            // Sign and send — Phantom shows the transaction details
-            // User approves → Phantom signs → sends to network
-            const signatures = await wallet.signAndSendTransactions({
-              transactions: [transaction],
-            });
+          // Sign and send — Phantom shows the transaction details
+          // User approves → Phantom signs → sends to network
+          const signatures = await wallet.signAndSendTransactions({
+            transactions: [transaction],
+          });
 
-            return signatures[0];
-          }
-        );
+          return signatures[0];
+        });
 
         return txSignature;
       } finally {
         setSending(false);
       }
     },
-    [publicKey, connection, cluster]
+    [publicKey, connection, cluster],
   );
 
   return {

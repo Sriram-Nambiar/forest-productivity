@@ -132,7 +132,8 @@ export async function confirmTransaction(
       "confirmed",
     );
     return !result.value.err;
-  } catch {
+  } catch (error) {
+    console.error("[confirmTransaction] Error:", error);
     return false;
   }
 }

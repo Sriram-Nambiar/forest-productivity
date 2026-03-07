@@ -37,7 +37,8 @@
           "action": "VIEW",
           "data": [
             {
-              "scheme": "forestfocustimer"
+              "scheme": "solana-wallet",
+              "host": "v1"
             }
           ],
           "category": ["BROWSABLE", "DEFAULT"]

@@ -3,6 +3,7 @@ import {
   Web3MobileWallet,
 } from '@solana-mobile/mobile-wallet-adapter-protocol-web3js';
 import { PublicKey } from '@solana/web3.js';
+import bs58 from 'bs58';
 import { router } from 'expo-router';
 import React, { useCallback, useRef, useState } from 'react';
 import {
@@ -28,9 +29,19 @@ import { useSettingsStore } from '../store/settingsStore';
 import { useWalletStore } from '../store/walletStore';
 
 const APP_IDENTITY = {
-  name: 'Seeker Solana Forest',
+  name: 'Forest Focus Timer',
   uri: 'https://forestfocus.app',
+  icon: 'favicon.png',
 };
+
+/**
+ * Convert a MWA signAndSendTransactions result entry to a base58 signature string.
+ * MWA returns Uint8Array[] of raw signature bytes.
+ */
+function extractSignature(result: string | Uint8Array): string {
+  if (typeof result === 'string') return result;
+  return bs58.encode(Buffer.from(result));
+}
 
 export default function WalletScreen() {
   const darkMode = useSettingsStore((s) => s.darkMode);
@@ -70,9 +81,10 @@ export default function WalletScreen() {
       }
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error';
-      if (message.includes('cancel') || message.includes('reject')) {
+      console.error('[Wallet Connect] Error:', message);
+      if (message.includes('cancel') || message.includes('reject') || message.includes('declined')) {
         Alert.alert('Connection Cancelled', 'You cancelled the wallet connection.');
-      } else if (message.includes('not found') || message.includes('not installed')) {
+      } else if (message.includes('not found') || message.includes('not installed') || message.includes('No compatible wallet')) {
         Alert.alert(
           'Wallet Not Found',
           'Please install a Solana wallet app (e.g., Phantom, Solflare) to connect.',
@@ -129,9 +141,7 @@ export default function WalletScreen() {
       );
 
       if (signedResult?.[0]) {
-        const sig = typeof signedResult[0] === 'string'
-          ? signedResult[0]
-          : Buffer.from(signedResult[0] as Uint8Array).toString('base64');
+        const sig = extractSignature(signedResult[0]);
 
         setLastTxSignature(sig);
         setLastRewardTimestamp(Date.now());
@@ -145,9 +155,10 @@ export default function WalletScreen() {
       }
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error';
+      console.error('[Send Reward] Error:', message);
       if (message.includes('insufficient') || message.includes('balance')) {
         Alert.alert('Insufficient Balance', 'You do not have enough SOL for this transaction.');
-      } else if (message.includes('cancel') || message.includes('reject')) {
+      } else if (message.includes('cancel') || message.includes('reject') || message.includes('declined')) {
         Alert.alert('Transaction Cancelled', 'You cancelled the transaction.');
       } else {
         Alert.alert('Transaction Error', message);
@@ -182,15 +193,14 @@ export default function WalletScreen() {
       );
 
       if (signedResult?.[0]) {
-        const sig = typeof signedResult[0] === 'string'
-          ? signedResult[0]
-          : Buffer.from(signedResult[0] as Uint8Array).toString('base64');
+        const sig = extractSignature(signedResult[0]);
 
         setLastTxSignature(sig);
         Alert.alert('Memo Recorded! 📝', `Focus proof written on-chain.\nSignature: ${sig.slice(0, 16)}...`);
       }
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error';
+      console.error('[Send Memo] Error:', message);
       Alert.alert('Memo Error', message);
     } finally {
       txInProgressRef.current = false;
@@ -210,7 +220,7 @@ export default function WalletScreen() {
     const next: SolanaCluster = cluster === 'devnet' ? 'mainnet-beta' : 'devnet';
     Alert.alert(
       'Switch Network',
-      `Switch to ${next}? This will disconnect your current wallet session.`,
+      `Switch to ${next === 'devnet' ? 'Devnet' : 'Mainnet'}? This will disconnect your current wallet session.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -310,7 +320,6 @@ export default function WalletScreen() {
               )}
             </TouchableOpacity>
 
-            {/* ── NEW: Send SOL button ── */}
             <TouchableOpacity
               style={[styles.actionBtn, styles.sendSolBtn, txLoading && styles.actionBtnDisabled]}
               onPress={() => router.push('/send' as any)}
@@ -337,7 +346,7 @@ export default function WalletScreen() {
 
         <View style={styles.footer}>
           <Text style={[styles.footerText, darkMode && styles.subtextDark]}>
-            Seeker Solana Forest – Focus Timer
+            Forest Focus Timer – Solana Integration
           </Text>
         </View>
       </ScrollView>
@@ -346,165 +355,37 @@ export default function WalletScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-  },
-  containerDark: {
-    backgroundColor: COLORS.backgroundDark,
-  },
-  scrollContent: {
-    paddingHorizontal: 20,
-    paddingBottom: 40,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: COLORS.primaryDark,
-    paddingVertical: 16,
-  },
-  titleDark: {
-    color: COLORS.primaryLight,
-  },
-  networkBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    backgroundColor: '#E8F5E9',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    marginBottom: 16,
-  },
-  networkBadgeMainnet: {
-    backgroundColor: '#F3E5F5',
-  },
-  networkDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: COLORS.success,
-    marginRight: 8,
-  },
-  networkDotMainnet: {
-    backgroundColor: COLORS.solana,
-  },
-  networkText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: COLORS.text,
-  },
-  card: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-  },
-  cardDark: {
-    backgroundColor: COLORS.surfaceDark,
-  },
-  cardLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: COLORS.textSecondary,
-    letterSpacing: 1,
-    marginBottom: 8,
-  },
-  cardDescription: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    lineHeight: 20,
-    marginBottom: 16,
-  },
-  publicKey: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: COLORS.text,
-    marginBottom: 4,
-  },
-  fullKey: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-    marginBottom: 12,
-  },
-  textDark: {
-    color: COLORS.textDark,
-  },
-  subtextDark: {
-    color: COLORS.textSecondaryDark,
-  },
-  connectBtn: {
-    backgroundColor: COLORS.solana,
-    borderRadius: 10,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  connectBtnDisabled: {
-    opacity: 0.6,
-  },
-  connectBtnText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  disconnectBtn: {
-    borderWidth: 1,
-    borderColor: COLORS.error,
-    borderRadius: 10,
-    paddingVertical: 10,
-    alignItems: 'center',
-  },
-  disconnectText: {
-    color: COLORS.error,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  actionBtn: {
-    backgroundColor: COLORS.primary,
-    borderRadius: 10,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  memoBtn: {
-    backgroundColor: COLORS.solana,
-  },
-  sendSolBtn: {
-    backgroundColor: '#FF6F00',
-  },
-  actionBtnDisabled: {
-    opacity: 0.6,
-  },
-  actionBtnText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  txSig: {
-    fontSize: 13,
-    fontFamily: 'monospace',
-    color: COLORS.text,
-    marginBottom: 8,
-  },
-  viewTxBtn: {
-    alignSelf: 'flex-start',
-  },
-  viewTxText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.solana,
-  },
-  footer: {
-    alignItems: 'center',
-    marginTop: 32,
-  },
-  footerText: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-  },
+  container: { flex: 1, backgroundColor: COLORS.background },
+  containerDark: { backgroundColor: COLORS.backgroundDark },
+  scrollContent: { paddingHorizontal: 20, paddingBottom: 40 },
+  title: { fontSize: 28, fontWeight: '700', color: COLORS.primaryDark, paddingVertical: 16 },
+  titleDark: { color: COLORS.primaryLight },
+  networkBadge: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', backgroundColor: '#E8F5E9', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, marginBottom: 16 },
+  networkBadgeMainnet: { backgroundColor: '#F3E5F5' },
+  networkDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.success, marginRight: 8 },
+  networkDotMainnet: { backgroundColor: COLORS.solana },
+  networkText: { fontSize: 13, fontWeight: '600', color: COLORS.text },
+  card: { backgroundColor: COLORS.surface, borderRadius: 12, padding: 16, marginBottom: 12, elevation: 1, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 2 },
+  cardDark: { backgroundColor: COLORS.surfaceDark },
+  cardLabel: { fontSize: 12, fontWeight: '600', color: COLORS.textSecondary, letterSpacing: 1, marginBottom: 8 },
+  cardDescription: { fontSize: 14, color: COLORS.textSecondary, lineHeight: 20, marginBottom: 16 },
+  publicKey: { fontSize: 22, fontWeight: '700', color: COLORS.text, marginBottom: 4 },
+  fullKey: { fontSize: 12, color: COLORS.textSecondary, marginBottom: 12 },
+  textDark: { color: COLORS.textDark },
+  subtextDark: { color: COLORS.textSecondaryDark },
+  connectBtn: { backgroundColor: COLORS.solana, borderRadius: 10, paddingVertical: 14, alignItems: 'center' },
+  connectBtnDisabled: { opacity: 0.6 },
+  connectBtnText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
+  disconnectBtn: { borderWidth: 1, borderColor: COLORS.error, borderRadius: 10, paddingVertical: 10, alignItems: 'center' },
+  disconnectText: { color: COLORS.error, fontSize: 14, fontWeight: '600' },
+  actionBtn: { backgroundColor: COLORS.primary, borderRadius: 10, paddingVertical: 14, alignItems: 'center', marginBottom: 8 },
+  memoBtn: { backgroundColor: COLORS.solana },
+  sendSolBtn: { backgroundColor: '#FF6F00' },
+  actionBtnDisabled: { opacity: 0.6 },
+  actionBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
+  txSig: { fontSize: 13, fontFamily: 'monospace', color: COLORS.text, marginBottom: 8 },
+  viewTxBtn: { alignSelf: 'flex-start' },
+  viewTxText: { fontSize: 14, fontWeight: '600', color: COLORS.solana },
+  footer: { alignItems: 'center', marginTop: 32 },
+  footerText: { fontSize: 12, color: COLORS.textSecondary },
 });
