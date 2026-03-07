@@ -1,15 +1,21 @@
 import {
-  PublicKey,
-  Transaction,
-  SystemProgram,
-  TransactionInstruction,
   LAMPORTS_PER_SOL,
-} from '@solana/web3.js';
-import { getConnection } from './connection';
-import { TREASURY_WALLET, REWARD_AMOUNT_SOL, type SolanaCluster } from './config';
+  PublicKey,
+  SystemProgram,
+  Transaction,
+  TransactionInstruction,
+} from "@solana/web3.js";
+import {
+  REWARD_AMOUNT_SOL,
+  TREASURY_WALLET,
+  type SolanaCluster,
+} from "./config";
+import { getConnection } from "./connection";
 
 /** Solana Memo Program ID */
-const MEMO_PROGRAM_ID = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr');
+const MEMO_PROGRAM_ID = new PublicKey(
+  "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr",
+);
 
 export interface TransactionResult {
   signature: string;
@@ -26,7 +32,8 @@ export async function buildRewardTransaction(
   const connection = getConnection(cluster);
   const treasury = new PublicKey(TREASURY_WALLET);
 
-  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+  const { blockhash, lastValidBlockHeight } =
+    await connection.getLatestBlockhash("confirmed");
 
   const transaction = new Transaction({
     blockhash,
@@ -55,11 +62,11 @@ export async function buildMemoTransaction(
 ): Promise<Transaction> {
   const connection = getConnection(cluster);
 
-  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+  const { blockhash, lastValidBlockHeight } =
+    await connection.getLatestBlockhash("confirmed");
 
   const memo = `Focus session completed: ${durationMinutes} minutes`;
-  // Memo program requires UTF-8 encoded data
-  const memoBuffer = Buffer.from(memo, 'utf-8');
+  const memoBuffer = Buffer.from(memo, "utf-8");
 
   const transaction = new Transaction({
     blockhash,
@@ -79,6 +86,37 @@ export async function buildMemoTransaction(
 }
 
 /**
+ * Build a SOL transfer transaction to an arbitrary recipient.
+ */
+export async function buildSendSOLTransaction(
+  payerPublicKey: PublicKey,
+  recipientPublicKey: PublicKey,
+  amountSOL: number,
+  cluster: SolanaCluster,
+): Promise<Transaction> {
+  const connection = getConnection(cluster);
+
+  const { blockhash, lastValidBlockHeight } =
+    await connection.getLatestBlockhash("confirmed");
+
+  const transaction = new Transaction({
+    blockhash,
+    lastValidBlockHeight,
+    feePayer: payerPublicKey,
+  });
+
+  transaction.add(
+    SystemProgram.transfer({
+      fromPubkey: payerPublicKey,
+      toPubkey: recipientPublicKey,
+      lamports: Math.round(amountSOL * LAMPORTS_PER_SOL),
+    }),
+  );
+
+  return transaction;
+}
+
+/**
  * Confirm a transaction and return whether it succeeded.
  */
 export async function confirmTransaction(
@@ -87,10 +125,11 @@ export async function confirmTransaction(
 ): Promise<boolean> {
   const connection = getConnection(cluster);
   try {
-    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+    const { blockhash, lastValidBlockHeight } =
+      await connection.getLatestBlockhash("confirmed");
     const result = await connection.confirmTransaction(
       { signature, blockhash, lastValidBlockHeight },
-      'confirmed',
+      "confirmed",
     );
     return !result.value.err;
   } catch {

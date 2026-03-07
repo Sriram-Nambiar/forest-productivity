@@ -1,18 +1,7 @@
+// ⚠️ MUST be imported BEFORE any @solana/web3.js usage
+import "react-native-get-random-values";
+
 import { Buffer } from "buffer";
-import { getRandomValues as expoCryptoGetRandomValues } from "expo-crypto";
 
+// Ensure Buffer is globally available (required by @solana/web3.js)
 global.Buffer = global.Buffer || Buffer;
-
-class Crypto {
-  getRandomValues = expoCryptoGetRandomValues;
-}
-
-const webCrypto = typeof crypto !== "undefined" ? crypto : new Crypto();
-
-if (typeof crypto === "undefined") {
-  Object.defineProperty(globalThis, "crypto", {
-    configurable: true,
-    enumerable: true,
-    get: () => webCrypto,
-  });
-}

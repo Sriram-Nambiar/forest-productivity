@@ -1,30 +1,31 @@
-import React, { useCallback, useRef, useState } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  ScrollView,
-  Alert,
-  Linking,
-  ActivityIndicator,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { PublicKey } from '@solana/web3.js';
 import {
   transact,
   Web3MobileWallet,
 } from '@solana-mobile/mobile-wallet-adapter-protocol-web3js';
+import { PublicKey } from '@solana/web3.js';
+import { router } from 'expo-router';
+import React, { useCallback, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Linking,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { COLORS } from '../constants';
-import { useSettingsStore } from '../store/settingsStore';
-import { useWalletStore } from '../store/walletStore';
 import {
   getExplorerUrl,
   REWARD_AMOUNT_SOL,
   REWARD_COOLDOWN_MS,
   type SolanaCluster,
 } from '../solana/config';
-import { buildRewardTransaction, buildMemoTransaction, confirmTransaction } from '../solana/transactions';
+import { buildMemoTransaction, buildRewardTransaction, confirmTransaction } from '../solana/transactions';
+import { useSettingsStore } from '../store/settingsStore';
+import { useWalletStore } from '../store/walletStore';
 
 const APP_IDENTITY = {
   name: 'Seeker Solana Forest',
@@ -100,7 +101,6 @@ export default function WalletScreen() {
   const handleSendReward = useCallback(async () => {
     if (!publicKey || txInProgressRef.current) return;
 
-    // Rate-limit
     const now = Date.now();
     if (now - lastRewardTimestamp < REWARD_COOLDOWN_MS) {
       const waitSec = Math.ceil((REWARD_COOLDOWN_MS - (now - lastRewardTimestamp)) / 1000);
@@ -309,6 +309,16 @@ export default function WalletScreen() {
                 <Text style={styles.actionBtnText}>Record Focus Memo 📝</Text>
               )}
             </TouchableOpacity>
+
+            {/* ── NEW: Send SOL button ── */}
+            <TouchableOpacity
+              style={[styles.actionBtn, styles.sendSolBtn, txLoading && styles.actionBtnDisabled]}
+              onPress={() => router.push('/send' as any)}
+              disabled={txLoading}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.actionBtnText}>Send SOL 💸</Text>
+            </TouchableOpacity>
           </View>
         )}
 
@@ -463,6 +473,9 @@ const styles = StyleSheet.create({
   },
   memoBtn: {
     backgroundColor: COLORS.solana,
+  },
+  sendSolBtn: {
+    backgroundColor: '#FF6F00',
   },
   actionBtnDisabled: {
     opacity: 0.6,
