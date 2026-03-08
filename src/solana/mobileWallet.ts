@@ -5,8 +5,8 @@ import type { SolanaCluster } from "./config";
 
 export const APP_IDENTITY = {
   name: "Forest Focus Timer",
-  uri: "forestfocus://",
-  icon: "../assets/images/icon.png",
+  uri: "https://forestfocus.app",
+  icon: "https://forestfocus.app/favicon.png",
 } as const;
 
 export interface WalletAuthorizationState {
@@ -16,8 +16,10 @@ export interface WalletAuthorizationState {
   publicKey: PublicKey;
 }
 
-export function clusterToChain(cluster: SolanaCluster): SolanaCluster {
-  return cluster;
+export function clusterToChain(
+  cluster: SolanaCluster,
+): `solana:${SolanaCluster}` {
+  return `solana:${cluster}`;
 }
 
 export function decodeWalletAddress(address: string | Uint8Array): PublicKey {
@@ -70,7 +72,25 @@ export function isLikelyWalletMissing(errorMessage: string): boolean {
     lower.includes("not found") ||
     lower.includes("not installed") ||
     lower.includes("no compatible wallet") ||
-    lower.includes("activity not found")
+    lower.includes("activity not found") ||
+    lower.includes("connectionfailedexception") ||
+    lower.includes("unable to connect to websocket server") ||
+    lower.includes("failed to bind")
+  );
+}
+
+function isLikelyModeMismatch(errorMessage: string): boolean {
+  const lower = errorMessage.toLowerCase();
+  return lower.includes("incorrect mode") || lower.includes("cluster");
+}
+
+function isLikelyInvalidAuthToken(errorMessage: string): boolean {
+  const lower = errorMessage.toLowerCase();
+  return (
+    lower.includes("auth_token") ||
+    lower.includes("auth token") ||
+    lower.includes("not authorized") ||
+    lower.includes("authorization")
   );
 }
 
@@ -81,20 +101,39 @@ export function normalizeErrorMessage(error: unknown): string {
   return String(error);
 }
 
+async function runAuthorize(
+  wallet: Web3MobileWallet,
+  cluster: SolanaCluster,
+  authToken?: string | null,
+) {
+  return wallet.authorize({
+    identity: APP_IDENTITY,
+    chain: clusterToChain(cluster),
+    auth_token: authToken ?? undefined,
+  } as any);
+}
+
 export async function authorizeWalletSession(
   wallet: Web3MobileWallet,
   cluster: SolanaCluster,
   currentAuthToken?: string | null,
 ): Promise<WalletAuthorizationState> {
-  const params = {
-    identity: APP_IDENTITY,
-    chain: clusterToChain(cluster),
-    auth_token: currentAuthToken ?? undefined,
-  };
+  let authorizationResult;
 
-  const authorizationResult = await wallet.authorize(params);
+  try {
+    authorizationResult = await runAuthorize(wallet, cluster, currentAuthToken);
+  } catch (error: unknown) {
+    const message = normalizeErrorMessage(error);
+
+    // Wallet mode switched or token became stale; retry with a fresh authorization request.
+    if (isLikelyModeMismatch(message) || isLikelyInvalidAuthToken(message)) {
+      authorizationResult = await runAuthorize(wallet, cluster, null);
+    } else {
+      throw error;
+    }
+  }
+
   const account = authorizationResult.accounts[0];
-
   if (!account) {
     throw new Error("Wallet did not return any authorized account.");
   }

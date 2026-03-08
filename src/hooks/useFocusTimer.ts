@@ -3,10 +3,12 @@ import * as Notifications from "expo-notifications";
 import { useCallback, useEffect, useRef } from "react";
 import { AppState, type AppStateStatus } from "react-native";
 import { GRACE_PERIOD_MS, TIMER_INTERVAL_MS } from "../constants";
-import { useLevelStore } from "../store/levelStore"; // ← ADD
+import { mintTreeNFT } from "../solana/nft";
+import { useLevelStore } from "../store/levelStore";
 import { useSessionStore } from "../store/sessionStore";
 import { useSettingsStore } from "../store/settingsStore";
 import { useTimerStore } from "../store/timerStore";
+import { useWalletStore } from "../store/walletStore";
 import { generateId, getProgress, getTreeStage } from "../utils/helpers";
 import type { FocusSession } from "../utils/types";
 
@@ -30,7 +32,14 @@ export function useFocusTimer() {
   const addSession = useSessionStore((s) => s.addSession);
   const strictMode = useSettingsStore((s) => s.strictMode);
   const notificationsEnabled = useSettingsStore((s) => s.notificationsEnabled);
-  const addPoints = useLevelStore((s) => s.addPoints); // ← ADD
+  const addPoints = useLevelStore((s) => s.addPoints);
+
+  const walletPublicKey = useWalletStore((s) => s.publicKey);
+  const walletCluster = useWalletStore((s) => s.cluster);
+  const walletAuthToken = useWalletStore((s) => s.authToken);
+  const walletUriBase = useWalletStore((s) => s.walletUriBase);
+  const setAuthorizationState = useWalletStore((s) => s.setAuthorizationState);
+  const setLastTxSignature = useWalletStore((s) => s.setLastTxSignature);
 
   const totalSeconds = durationMinutes * 60;
   const progress = getProgress(remainingSeconds, totalSeconds);
@@ -68,6 +77,32 @@ export function useFocusTimer() {
     [durationMinutes, progress, addSession, clearPersistedSession],
   );
 
+  const maybeMintTreeNft = useCallback(async () => {
+    if (!walletPublicKey) return;
+
+    try {
+      const minted = await mintTreeNFT({
+        ownerPublicKey: walletPublicKey,
+        cluster: walletCluster,
+        authToken: walletAuthToken,
+        walletUriBase,
+        onAuthorizationUpdated: setAuthorizationState,
+      });
+
+      setLastTxSignature(minted.signature);
+    } catch (error) {
+      console.error("[TreeNFT] Mint failed:", error);
+      // We do not block timer completion if NFT mint fails.
+    }
+  }, [
+    setAuthorizationState,
+    setLastTxSignature,
+    walletAuthToken,
+    walletCluster,
+    walletPublicKey,
+    walletUriBase,
+  ]);
+
   const handleComplete = useCallback(async () => {
     clearInterval_();
     completeTimer();
@@ -93,7 +128,8 @@ export function useFocusTimer() {
     }
 
     await saveSession("completed");
-    await addPoints(durationMinutes); // ← ADD THIS LINE
+    await addPoints(durationMinutes);
+    await maybeMintTreeNft();
   }, [
     clearInterval_,
     completeTimer,
@@ -101,6 +137,7 @@ export function useFocusTimer() {
     durationMinutes,
     saveSession,
     addPoints,
+    maybeMintTreeNft,
   ]);
 
   const handleFail = useCallback(async () => {
@@ -117,7 +154,6 @@ export function useFocusTimer() {
     await saveSession("failed");
   }, [clearInterval_, clearGrace, failTimer, saveSession]);
 
-  // Timer interval
   useEffect(() => {
     if (status === "running") {
       intervalRef.current = setInterval(() => {
@@ -135,14 +171,12 @@ export function useFocusTimer() {
     return clearInterval_;
   }, [status, tick, handleComplete, clearInterval_]);
 
-  // Persist session periodically
   useEffect(() => {
     if (status === "running" || status === "paused") {
       persistSession();
     }
   }, [status, remainingSeconds, persistSession]);
 
-  // AppState listener for distraction detection
   useEffect(() => {
     const subscription = AppState.addEventListener(
       "change",
@@ -151,8 +185,9 @@ export function useFocusTimer() {
         appStateRef.current = nextState;
 
         const timerState = useTimerStore.getState();
-        if (timerState.status !== "running" && timerState.status !== "paused")
+        if (timerState.status !== "running" && timerState.status !== "paused") {
           return;
+        }
 
         if (
           prevState === "active" &&
@@ -188,7 +223,6 @@ export function useFocusTimer() {
     };
   }, [strictMode, handleFail, clearGrace]);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       clearInterval_();
