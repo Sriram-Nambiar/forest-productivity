@@ -1,1 +1,3 @@
-export { useFocusTimer } from './useFocusTimer';
+export { useFocusTimer } from "./useFocusTimer";
+export { useWallet } from "./useWallet";
+

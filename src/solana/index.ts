@@ -7,8 +7,7 @@ export {
   REWARD_AMOUNT_SOL,
   REWARD_COOLDOWN_MS,
   RPC_ENDPOINTS,
-  TREASURY_WALLET,
-  TREE_NFT_METADATA_URI
+  TREASURY_WALLET
 } from "./config";
 export type { SolanaCluster } from "./config";
 
