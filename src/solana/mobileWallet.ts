@@ -7,7 +7,7 @@ import type { SolanaCluster } from "./config";
 export const APP_IDENTITY = {
   name: "Forest Focus Timer",
   uri: "https://forestfocus.app",
-  icon: "https://forestfocus.app/favicon.png",
+  icon: "/icon.png",
 } as const;
 
 // ─── Types ───
