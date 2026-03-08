@@ -10,6 +10,8 @@ Get distracted. Watch it die.
 
 # 🚀 Overview
 
+![Alt text for the image](images/screenshot.png)
+
 Forest Focus is a minimal, distraction-aware productivity app where:
 
 - 🌱 A tree grows when you stay focused
