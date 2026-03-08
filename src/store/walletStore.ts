@@ -57,12 +57,7 @@ export const useWalletStore = create<WalletState>((set) => ({
     walletUriBase,
     accountLabel,
   }) => {
-    set({
-      publicKey,
-      authToken,
-      walletUriBase,
-      accountLabel,
-    });
+    set({ publicKey, authToken, walletUriBase, accountLabel });
   },
 
   clearAuthorization: () => {
@@ -76,6 +71,7 @@ export const useWalletStore = create<WalletState>((set) => ({
   },
 
   setCluster: (cluster: SolanaCluster) => {
+    // Changing cluster invalidates the wallet session
     set({
       cluster,
       publicKey: null,
@@ -101,6 +97,7 @@ export const useWalletStore = create<WalletState>((set) => ({
 
   loadWalletSettings: async () => {
     const saved = await safeGetItem<string>(STORAGE_KEYS.WALLET_CLUSTER);
+    // Only "devnet" is valid in this build
     if (saved === "devnet") {
       set({ cluster: saved });
     }

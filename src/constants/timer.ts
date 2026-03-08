@@ -24,7 +24,7 @@ export const STORAGE_KEYS = {
   SETTINGS: "@forest_settings",
   ACTIVE_SESSION: "@forest_active_session",
   WALLET_CLUSTER: "@forest_wallet_cluster",
-  LEVEL_DATA: "@forest_level_data", // ← ADD THIS LINE
+  LEVEL_DATA: "@forest_level_data",
 } as const;
 
 export const COLORS = {

@@ -17,6 +17,19 @@ const LEVEL_THRESHOLDS = [
   30000, // Level 10
 ];
 
+const LEVEL_TITLES: Record<number, string> = {
+  1: "Seedling",
+  2: "Sprout",
+  3: "Sapling",
+  4: "Young Tree",
+  5: "Tree",
+  6: "Tall Tree",
+  7: "Oak",
+  8: "Ancient Oak",
+  9: "Elder Tree",
+  10: "Forest Guardian",
+};
+
 function calculateLevel(points: number): number {
   for (let i = LEVEL_THRESHOLDS.length - 1; i >= 0; i--) {
     if (points >= LEVEL_THRESHOLDS[i]) return i + 1;
@@ -35,6 +48,10 @@ function getPointsForNextLevel(level: number): number {
   );
 }
 
+function getLevelTitle(level: number): string {
+  return LEVEL_TITLES[level] ?? "Forest Guardian";
+}
+
 interface LevelData {
   totalPoints: number;
 }
@@ -42,6 +59,7 @@ interface LevelData {
 interface LevelState {
   totalPoints: number;
   level: number;
+  title: string;
   pointsInCurrentLevel: number;
   pointsNeededForNextLevel: number;
   progressToNextLevel: number;
@@ -50,9 +68,26 @@ interface LevelState {
   addPoints: (minutes: number) => Promise<void>;
 }
 
+function computeDerivedState(totalPoints: number) {
+  const level = calculateLevel(totalPoints);
+  const currentLevelStart = getPointsForCurrentLevel(level);
+  const nextLevelStart = getPointsForNextLevel(level);
+  const pointsInLevel = totalPoints - currentLevelStart;
+  const levelRange = nextLevelStart - currentLevelStart;
+  return {
+    totalPoints,
+    level,
+    title: getLevelTitle(level),
+    pointsInCurrentLevel: pointsInLevel,
+    pointsNeededForNextLevel: levelRange,
+    progressToNextLevel: levelRange > 0 ? pointsInLevel / levelRange : 1,
+  };
+}
+
 export const useLevelStore = create<LevelState>((set, get) => ({
   totalPoints: 0,
   level: 1,
+  title: "Seedling",
   pointsInCurrentLevel: 0,
   pointsNeededForNextLevel: 500,
   progressToNextLevel: 0,
@@ -65,17 +100,8 @@ export const useLevelStore = create<LevelState>((set, get) => ({
       typeof saved === "object" &&
       typeof saved.totalPoints === "number"
     ) {
-      const level = calculateLevel(saved.totalPoints);
-      const currentLevelStart = getPointsForCurrentLevel(level);
-      const nextLevelStart = getPointsForNextLevel(level);
-      const pointsInLevel = saved.totalPoints - currentLevelStart;
-      const levelRange = nextLevelStart - currentLevelStart;
       set({
-        totalPoints: saved.totalPoints,
-        level,
-        pointsInCurrentLevel: pointsInLevel,
-        pointsNeededForNextLevel: levelRange,
-        progressToNextLevel: levelRange > 0 ? pointsInLevel / levelRange : 1,
+        ...computeDerivedState(saved.totalPoints),
         loaded: true,
       });
     } else {
@@ -84,20 +110,14 @@ export const useLevelStore = create<LevelState>((set, get) => ({
   },
 
   addPoints: async (minutes: number) => {
-    const points = minutes * 10;
-    const newTotal = get().totalPoints + points;
-    const level = calculateLevel(newTotal);
-    const currentLevelStart = getPointsForCurrentLevel(level);
-    const nextLevelStart = getPointsForNextLevel(level);
-    const pointsInLevel = newTotal - currentLevelStart;
-    const levelRange = nextLevelStart - currentLevelStart;
+    // Points formula: 10 points per minute of focus
+    const earned = Math.max(0, Math.round(minutes * 10));
+    const newTotal = get().totalPoints + earned;
+
     set({
-      totalPoints: newTotal,
-      level,
-      pointsInCurrentLevel: pointsInLevel,
-      pointsNeededForNextLevel: levelRange,
-      progressToNextLevel: levelRange > 0 ? pointsInLevel / levelRange : 1,
+      ...computeDerivedState(newTotal),
     });
+
     await safeSetItem(STORAGE_KEYS.LEVEL_DATA, { totalPoints: newTotal });
   },
 }));

@@ -1,7 +1,7 @@
 import * as Haptics from "expo-haptics";
 import * as Notifications from "expo-notifications";
 import { useCallback, useEffect, useRef } from "react";
-import { AppState, type AppStateStatus } from "react-native";
+import { Alert, AppState, type AppStateStatus } from "react-native";
 import { GRACE_PERIOD_MS, TIMER_INTERVAL_MS } from "../constants";
 import { mintTreeNFT } from "../solana/nft";
 import { useLevelStore } from "../store/levelStore";
@@ -77,30 +77,43 @@ export function useFocusTimer() {
     [durationMinutes, progress, addSession, clearPersistedSession],
   );
 
-  const maybeMintTreeNft = useCallback(async () => {
-    if (!walletPublicKey) return;
+  /**
+   * Attempt to mint a Tree NFT after focus session completes.
+   * This is fire-and-forget — failure does not block the session completion.
+   */
+  const tryMintTreeNFT = useCallback(async () => {
+    if (!walletPublicKey) {
+      console.log("[tryMintTreeNFT] No wallet connected, skipping NFT mint.");
+      return;
+    }
 
     try {
-      const minted = await mintTreeNFT({
-        ownerPublicKey: walletPublicKey,
-        cluster: walletCluster,
-        authToken: walletAuthToken,
+      const signature = await mintTreeNFT(
+        walletCluster,
+        walletAuthToken,
         walletUriBase,
-        onAuthorizationUpdated: setAuthorizationState,
-      });
+        (authUpdate) => {
+          setAuthorizationState(authUpdate);
+        },
+      );
 
-      setLastTxSignature(minted.signature);
+      if (signature) {
+        setLastTxSignature(signature);
+        Alert.alert(
+          "🌳 Tree NFT Minted!",
+          "Your focus session tree has been minted as an NFT on Solana Devnet.",
+        );
+      }
     } catch (error) {
-      console.error("[TreeNFT] Mint failed:", error);
-      // We do not block timer completion if NFT mint fails.
+      console.warn("[tryMintTreeNFT] NFT mint failed (non-blocking):", error);
     }
   }, [
+    walletPublicKey,
+    walletCluster,
+    walletAuthToken,
+    walletUriBase,
     setAuthorizationState,
     setLastTxSignature,
-    walletAuthToken,
-    walletCluster,
-    walletPublicKey,
-    walletUriBase,
   ]);
 
   const handleComplete = useCallback(async () => {
@@ -129,7 +142,9 @@ export function useFocusTimer() {
 
     await saveSession("completed");
     await addPoints(durationMinutes);
-    await maybeMintTreeNft();
+
+    // Attempt NFT mint (non-blocking)
+    tryMintTreeNFT();
   }, [
     clearInterval_,
     completeTimer,
@@ -137,7 +152,7 @@ export function useFocusTimer() {
     durationMinutes,
     saveSession,
     addPoints,
-    maybeMintTreeNft,
+    tryMintTreeNFT,
   ]);
 
   const handleFail = useCallback(async () => {
@@ -154,6 +169,7 @@ export function useFocusTimer() {
     await saveSession("failed");
   }, [clearInterval_, clearGrace, failTimer, saveSession]);
 
+  // Timer interval
   useEffect(() => {
     if (status === "running") {
       intervalRef.current = setInterval(() => {
@@ -171,12 +187,14 @@ export function useFocusTimer() {
     return clearInterval_;
   }, [status, tick, handleComplete, clearInterval_]);
 
+  // Persist session periodically
   useEffect(() => {
     if (status === "running" || status === "paused") {
       persistSession();
     }
   }, [status, remainingSeconds, persistSession]);
 
+  // AppState listener for distraction detection
   useEffect(() => {
     const subscription = AppState.addEventListener(
       "change",
@@ -185,33 +203,29 @@ export function useFocusTimer() {
         appStateRef.current = nextState;
 
         const timerState = useTimerStore.getState();
-        if (timerState.status !== "running" && timerState.status !== "paused") {
-          return;
+
+        // Only care if timer is running
+        if (timerState.status !== "running") return;
+
+        // User left the app
+        if (prevState === "active" && nextState !== "active") {
+          if (strictMode) {
+            // Strict mode: fail immediately
+            handleFail();
+          } else {
+            // Grace period
+            clearGrace();
+            graceRef.current = setTimeout(() => {
+              const currentState = useTimerStore.getState();
+              if (currentState.status === "running") {
+                handleFail();
+              }
+            }, GRACE_PERIOD_MS);
+          }
         }
 
-        if (
-          prevState === "active" &&
-          (nextState === "background" || nextState === "inactive")
-        ) {
-          if (timerState.status === "running") {
-            if (strictMode) {
-              handleFail();
-            } else {
-              graceRef.current = setTimeout(() => {
-                const currentState = useTimerStore.getState();
-                if (
-                  currentState.status === "running" ||
-                  currentState.status === "paused"
-                ) {
-                  handleFail();
-                }
-              }, GRACE_PERIOD_MS);
-            }
-          }
-        } else if (
-          nextState === "active" &&
-          (prevState === "background" || prevState === "inactive")
-        ) {
+        // User returned to the app — cancel grace timer
+        if (prevState !== "active" && nextState === "active") {
           clearGrace();
         }
       },
@@ -219,16 +233,8 @@ export function useFocusTimer() {
 
     return () => {
       subscription.remove();
-      clearGrace();
     };
   }, [strictMode, handleFail, clearGrace]);
-
-  useEffect(() => {
-    return () => {
-      clearInterval_();
-      clearGrace();
-    };
-  }, [clearInterval_, clearGrace]);
 
   return {
     durationMinutes,
@@ -236,7 +242,6 @@ export function useFocusTimer() {
     status,
     progress,
     treeStage,
-    totalSeconds,
     handleFail,
     resetTimer,
   };

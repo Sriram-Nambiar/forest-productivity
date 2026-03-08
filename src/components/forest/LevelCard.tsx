@@ -7,24 +7,15 @@ interface LevelCardProps {
   darkMode: boolean;
 }
 
-const LEVEL_TITLES: Record<number, string> = {
-  1: 'Seedling',
-  2: 'Sprout',
-  3: 'Sapling',
-  4: 'Young Tree',
-  5: 'Growing Tree',
-  6: 'Mature Tree',
-  7: 'Elder Tree',
-  8: 'Ancient Oak',
-  9: 'Forest Guardian',
-  10: 'Forest Legend',
-};
-
 const LevelCard = memo(function LevelCard({ darkMode }: LevelCardProps) {
-  const { totalPoints, level, progressToNextLevel, pointsInCurrentLevel, pointsNeededForNextLevel } =
-    useLevelStore();
-
-  const title = LEVEL_TITLES[level] ?? `Level ${level}`;
+  const {
+    level,
+    title,
+    totalPoints,
+    pointsInCurrentLevel,
+    pointsNeededForNextLevel,
+    progressToNextLevel,
+  } = useLevelStore();
 
   return (
     <View style={[styles.card, darkMode && styles.cardDark]}>

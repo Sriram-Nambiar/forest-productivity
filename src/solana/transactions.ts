@@ -16,16 +16,18 @@ export interface TransactionResult {
   cluster: SolanaCluster;
 }
 
+/**
+ * Convert a SOL amount to lamports with validation.
+ */
 function solToLamports(amountSol: number): number {
   if (!Number.isFinite(amountSol) || amountSol <= 0) {
-    throw new Error("Transfer amount must be greater than zero.");
+    throw new Error("Transfer amount must be a positive finite number.");
   }
-
   return Math.round(amountSol * LAMPORTS_PER_SOL);
 }
 
 /**
- * Build a SOL transfer transaction to the treasury wallet.
+ * Build a SOL transfer transaction to the treasury wallet (reward tx).
  */
 export async function buildRewardTransaction(
   payerPublicKey: PublicKey,
@@ -86,7 +88,8 @@ export async function buildSendSOLTransaction(
 }
 
 /**
- * Confirm a transaction and return whether it succeeded.
+ * Confirm a transaction on-chain.
+ * Returns `true` if confirmed without error, `false` otherwise.
  */
 export async function confirmTransaction(
   signature: string,

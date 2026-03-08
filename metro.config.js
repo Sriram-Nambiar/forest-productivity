@@ -6,8 +6,8 @@ const config = getDefaultConfig(__dirname);
 
 config.resolver.extraNodeModules = {
   ...config.resolver.extraNodeModules,
-  crypto: require.resolve('react-native-get-random-values'),
+  buffer: require.resolve('buffer'),
   stream: require.resolve('stream-browserify'),
 };
 
-module.exports = config; 
+module.exports = config;

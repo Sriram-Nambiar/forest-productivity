@@ -2,7 +2,7 @@ import {
   transact,
   type Web3MobileWallet,
 } from '@solana-mobile/mobile-wallet-adapter-protocol-web3js';
-import { LAMPORTS_PER_SOL, PublicKey, Transaction } from '@solana/web3.js';
+import { LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js';
 import { router } from 'expo-router';
 import React, { useCallback, useRef, useState } from 'react';
 import {
@@ -24,9 +24,10 @@ import {
 } from '../solana/config';
 import { getConnection } from '../solana/connection';
 import {
-  APP_IDENTITY,
   authorizeWalletSession,
   extractSignature,
+  isLikelyInsufficientFunds,
+  isLikelyRpcFailure,
   isLikelyUserRejection,
   isLikelyWalletMissing,
   normalizeErrorMessage,
@@ -57,8 +58,10 @@ export default function WalletScreen() {
   } = useWalletStore();
 
   const [txLoading, setTxLoading] = useState(false);
+  const [balance, setBalance] = useState<number | null>(null);
   const txInProgressRef = useRef(false);
 
+  // ─── Connect Wallet ───
   const handleConnect = useCallback(async () => {
     if (connecting) return;
 
@@ -94,97 +97,58 @@ export default function WalletScreen() {
     } finally {
       setConnecting(false);
     }
-  }, [
-    authToken,
-    cluster,
-    connecting,
-    setAuthorizationState,
-    setConnecting,
-    walletUriBase,
-  ]);
+  }, [authToken, cluster, connecting, setAuthorizationState, setConnecting, walletUriBase]);
 
+  // ─── Disconnect Wallet ───
   const handleDisconnect = useCallback(() => {
     Alert.alert('Disconnect Wallet', 'Are you sure you want to disconnect?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Disconnect',
         style: 'destructive',
-        onPress: () => disconnect(),
+        onPress: () => {
+          disconnect();
+          setBalance(null);
+        },
       },
     ]);
   }, [disconnect]);
 
+  // ─── Balance Check ───
   const ensureSolBalance = useCallback(
     async (payer: PublicKey, estimatedSpendLamports: number): Promise<void> => {
       const connection = getConnection(cluster);
-      const currentLamports = await connection.getBalance(payer, 'confirmed');
-      const safetyBuffer = 10_000;
-      if (currentLamports < estimatedSpendLamports + safetyBuffer) {
-        throw new Error('Insufficient SOL balance for amount plus network fee.');
+      const bal = await connection.getBalance(payer);
+      if (bal < estimatedSpendLamports + 5000) {
+        throw new Error(
+          `Insufficient SOL balance. You have ${(bal / LAMPORTS_PER_SOL).toFixed(6)} SOL but need at least ${((estimatedSpendLamports + 5000) / LAMPORTS_PER_SOL).toFixed(6)} SOL (including fees).`,
+        );
       }
     },
     [cluster],
   );
 
-  const executeWalletTransaction = useCallback(
-    async (
-      txBuilder: (payer: PublicKey) => Promise<Transaction>,
-      opts?: { requireBalanceLamports?: number },
-    ): Promise<string> => {
-      if (!publicKey) {
-        throw new Error('Wallet not connected.');
-      }
+  // ─── Refresh Balance ───
+  const refreshBalance = useCallback(async () => {
+    if (!publicKey) return;
+    try {
+      const connection = getConnection(cluster);
+      const bal = await connection.getBalance(new PublicKey(publicKey));
+      setBalance(bal / LAMPORTS_PER_SOL);
+    } catch {
+      setBalance(null);
+    }
+  }, [publicKey, cluster]);
 
-      const payerPubkey = new PublicKey(publicKey);
-      if (opts?.requireBalanceLamports) {
-        await ensureSolBalance(payerPubkey, opts.requireBalanceLamports);
-      }
-
-      const tx = await txBuilder(payerPubkey);
-
-      const signatureResult = await transact(
-        async (wallet: Web3MobileWallet) => {
-          const authorization = await authorizeWalletSession(wallet, cluster, authToken);
-
-          setAuthorizationState({
-            publicKey: authorization.publicKey.toBase58(),
-            authToken: authorization.authToken,
-            walletUriBase: authorization.walletUriBase,
-            accountLabel: authorization.accountLabel,
-          });
-
-          const signatures = await wallet.signAndSendTransactions({
-            transactions: [tx],
-          });
-          return signatures[0];
-        },
-        walletUriBase ? { baseUri: walletUriBase } : undefined,
-      );
-
-      const signature = extractSignature(signatureResult);
-      setLastTxSignature(signature);
-      return signature;
-    },
-    [
-      authToken,
-      cluster,
-      ensureSolBalance,
-      publicKey,
-      setAuthorizationState,
-      setLastTxSignature,
-      walletUriBase,
-    ],
-  );
-
+  // ─── Send Reward Transaction ───
   const handleSendReward = useCallback(async () => {
     if (!publicKey || txInProgressRef.current) return;
 
+    // Rate limit check
     const now = Date.now();
     if (now - lastRewardTimestamp < REWARD_COOLDOWN_MS) {
-      const waitSec = Math.ceil(
-        (REWARD_COOLDOWN_MS - (now - lastRewardTimestamp)) / 1000,
-      );
-      Alert.alert('Please Wait', `You can send another reward in ${waitSec} seconds.`);
+      const remaining = Math.ceil((REWARD_COOLDOWN_MS - (now - lastRewardTimestamp)) / 1000);
+      Alert.alert('Please Wait', `You can send another reward in ${remaining}s.`);
       return;
     }
 
@@ -192,59 +156,87 @@ export default function WalletScreen() {
     setTxLoading(true);
 
     try {
-      const sig = await executeWalletTransaction(
-        (payer) => buildRewardTransaction(payer, cluster),
-        { requireBalanceLamports: Math.round(REWARD_AMOUNT_SOL * LAMPORTS_PER_SOL) },
+      const payerPk = new PublicKey(publicKey);
+      const rewardLamports = Math.round(REWARD_AMOUNT_SOL * LAMPORTS_PER_SOL);
+
+      await ensureSolBalance(payerPk, rewardLamports);
+
+      const signatureStr = await transact(
+        async (wallet: Web3MobileWallet) => {
+          const auth = await authorizeWalletSession(wallet, cluster, authToken);
+
+          setAuthorizationState({
+            publicKey: auth.publicKey.toBase58(),
+            authToken: auth.authToken,
+            walletUriBase: auth.walletUriBase,
+            accountLabel: auth.accountLabel,
+          });
+
+          const tx = await buildRewardTransaction(auth.publicKey, cluster);
+          const signatures = await wallet.signAndSendTransactions({
+            transactions: [tx],
+          });
+
+          const sig = signatures[0];
+          if (!sig) throw new Error('Wallet returned no signature.');
+          return extractSignature(sig);
+        },
+        walletUriBase ? { baseUri: walletUriBase } : undefined,
       );
 
+      setLastTxSignature(signatureStr);
       setLastRewardTimestamp(Date.now());
 
-      const confirmed = await confirmTransaction(sig, cluster);
+      const confirmed = await confirmTransaction(signatureStr, cluster);
+
       if (confirmed) {
-        Alert.alert(
-          'Reward Sent! 🎉',
-          `Sent ${REWARD_AMOUNT_SOL} SOL to treasury.\nSignature: ${sig.slice(0, 16)}...`,
-        );
+        Alert.alert('Reward Sent! 🎉', `${REWARD_AMOUNT_SOL} SOL sent to treasury.`);
       } else {
-        Alert.alert('Pending', 'Transaction submitted but not yet confirmed.');
+        Alert.alert('Transaction Pending', 'Transaction sent but confirmation timed out. It may still succeed.');
       }
+
+      refreshBalance();
     } catch (error: unknown) {
       const message = normalizeErrorMessage(error);
-      console.error('[Send Reward] Error:', message);
+      console.error('[Reward TX] Error:', message);
 
-      if (message.toLowerCase().includes('insufficient')) {
-        Alert.alert(
-          'Insufficient Balance',
-          'You do not have enough SOL for this transaction (including network fee).',
-        );
-      } else if (isLikelyUserRejection(message)) {
+      if (isLikelyUserRejection(message)) {
         Alert.alert('Transaction Cancelled', 'You cancelled the transaction.');
-      } else if (isLikelyWalletMissing(message)) {
-        Alert.alert('Wallet Not Found', 'No compatible Solana wallet app is installed.');
+      } else if (isLikelyInsufficientFunds(message)) {
+        Alert.alert('Insufficient SOL', message);
+      } else if (isLikelyRpcFailure(message)) {
+        Alert.alert('Network Error', 'Could not reach Solana devnet. Please try again.');
       } else {
-        Alert.alert('Transaction Error', message);
+        Alert.alert('Transaction Failed', message);
       }
     } finally {
       txInProgressRef.current = false;
       setTxLoading(false);
     }
   }, [
-    cluster,
-    executeWalletTransaction,
-    lastRewardTimestamp,
     publicKey,
+    authToken,
+    cluster,
+    lastRewardTimestamp,
+    walletUriBase,
+    setAuthorizationState,
+    setLastTxSignature,
     setLastRewardTimestamp,
+    ensureSolBalance,
+    refreshBalance,
   ]);
 
-  const handleViewTx = useCallback(() => {
+  // ─── Open Explorer ───
+  const handleOpenExplorer = useCallback(() => {
     if (!lastTxSignature) return;
     const url = getExplorerUrl(lastTxSignature, cluster);
-    Linking.openURL(url).catch(() => {
-      Alert.alert('Error', 'Could not open browser.');
-    });
+    Linking.openURL(url).catch(() =>
+      Alert.alert('Error', 'Could not open browser.'),
+    );
   }, [lastTxSignature, cluster]);
 
-  const shortKey = publicKey
+  // ─── Shorten public key for display ───
+  const shortenedKey = publicKey
     ? `${publicKey.slice(0, 6)}...${publicKey.slice(-4)}`
     : null;
 
@@ -253,148 +245,302 @@ export default function WalletScreen() {
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <Text style={[styles.title, darkMode && styles.titleDark]}>Wallet</Text>
 
+        {/* Network Badge */}
         <View style={styles.networkBadge}>
           <View style={styles.networkDot} />
           <Text style={styles.networkText}>Devnet</Text>
         </View>
 
-        <View style={[styles.card, darkMode && styles.cardDark]}>
-          {publicKey ? (
-            <>
-              <Text style={[styles.cardLabel, darkMode && styles.subtextDark]}>
-                CONNECTED
-              </Text>
-              <Text style={[styles.publicKey, darkMode && styles.textDark]}>{shortKey}</Text>
-              <Text
-                style={[styles.fullKey, darkMode && styles.subtextDark]}
-                numberOfLines={1}
-                ellipsizeMode="middle"
-              >
-                {publicKey}
-              </Text>
-              {!!accountLabel && (
-                <Text style={[styles.walletLabel, darkMode && styles.subtextDark]}>
-                  Wallet: {accountLabel}
-                </Text>
-              )}
-              <TouchableOpacity style={styles.disconnectBtn} onPress={handleDisconnect}>
-                <Text style={styles.disconnectText}>Disconnect</Text>
-              </TouchableOpacity>
-            </>
-          ) : (
-            <>
-              <Text style={[styles.cardLabel, darkMode && styles.subtextDark]}>
-                NOT CONNECTED
-              </Text>
-              <Text style={[styles.cardDescription, darkMode && styles.subtextDark]}>
-                Connect a Solana wallet to send rewards and test transfers on devnet.
-              </Text>
-              <TouchableOpacity
-                style={[styles.connectBtn, connecting && styles.connectBtnDisabled]}
-                onPress={handleConnect}
-                disabled={connecting}
-                activeOpacity={0.8}
-              >
-                {connecting ? (
-                  <ActivityIndicator color="#FFFFFF" size="small" />
-                ) : (
-                  <Text style={styles.connectBtnText}>Connect Wallet</Text>
-                )}
-              </TouchableOpacity>
-            </>
-          )}
-        </View>
-
-        {publicKey && (
-          <View style={[styles.card, darkMode && styles.cardDark]}>
-            <Text style={[styles.cardLabel, darkMode && styles.subtextDark]}>
-              ACTIONS
+        {!publicKey ? (
+          /* ─── Not Connected ─── */
+          <View style={styles.centerSection}>
+            <Text style={styles.walletEmoji}>🔗</Text>
+            <Text style={[styles.subtitle, darkMode && styles.subtextDark]}>
+              Connect a Solana wallet to send transactions and mint NFTs.
             </Text>
-
             <TouchableOpacity
-              style={[styles.actionBtn, txLoading && styles.actionBtnDisabled]}
-              onPress={handleSendReward}
-              disabled={txLoading}
+              style={styles.connectBtn}
+              onPress={handleConnect}
+              disabled={connecting}
               activeOpacity={0.8}
             >
-              {txLoading ? (
+              {connecting ? (
                 <ActivityIndicator color="#FFFFFF" size="small" />
               ) : (
-                <Text style={styles.actionBtnText}>
-                  Send {REWARD_AMOUNT_SOL} SOL Reward 🌳
-                </Text>
+                <Text style={styles.connectBtnText}>Connect Wallet</Text>
               )}
             </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.actionBtn, styles.sendSolBtn, txLoading && styles.actionBtnDisabled]}
-              onPress={() => router.push('/send' as never)}
-              disabled={txLoading}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.actionBtnText}>Send SOL 💸</Text>
-            </TouchableOpacity>
           </View>
-        )}
+        ) : (
+          /* ─── Connected ─── */
+          <>
+            {/* Wallet Info Card */}
+            <View style={[styles.card, darkMode && styles.cardDark]}>
+              <Text style={[styles.cardLabel, darkMode && styles.subtextDark]}>
+                CONNECTED WALLET
+              </Text>
+              {accountLabel && (
+                <Text style={[styles.accountLabel, darkMode && styles.textDark]}>
+                  {accountLabel}
+                </Text>
+              )}
+              <Text style={[styles.publicKeyText, darkMode && styles.textDark]}>
+                {shortenedKey}
+              </Text>
+              {balance !== null && (
+                <Text style={[styles.balanceText, darkMode && styles.subtextDark]}>
+                  Balance: {balance.toFixed(4)} SOL
+                </Text>
+              )}
+              <View style={styles.walletActions}>
+                <TouchableOpacity
+                  style={styles.refreshBtn}
+                  onPress={refreshBalance}
+                >
+                  <Text style={styles.refreshBtnText}>Refresh Balance</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.disconnectBtn}
+                  onPress={handleDisconnect}
+                >
+                  <Text style={styles.disconnectBtnText}>Disconnect</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
 
-        {lastTxSignature && (
-          <View style={[styles.card, darkMode && styles.cardDark]}>
-            <Text style={[styles.cardLabel, darkMode && styles.subtextDark]}>
-              LAST TRANSACTION
-            </Text>
-            <Text
-              style={[styles.txSig, darkMode && styles.textDark]}
-              numberOfLines={1}
-              ellipsizeMode="middle"
-            >
-              {lastTxSignature}
-            </Text>
-            <TouchableOpacity style={styles.viewTxBtn} onPress={handleViewTx}>
-              <Text style={styles.viewTxText}>View on Solscan ↗</Text>
-            </TouchableOpacity>
-          </View>
-        )}
+            {/* Actions */}
+            <View style={[styles.card, darkMode && styles.cardDark]}>
+              <Text style={[styles.cardLabel, darkMode && styles.subtextDark]}>
+                ACTIONS
+              </Text>
 
-        <View style={styles.footer}>
-          <Text style={[styles.footerText, darkMode && styles.subtextDark]}>
-            {APP_IDENTITY.name} – Solana Devnet
-          </Text>
-        </View>
+              {/* Reward Button */}
+              <TouchableOpacity
+                style={[styles.actionBtn, txLoading && styles.actionBtnDisabled]}
+                onPress={handleSendReward}
+                disabled={txLoading}
+                activeOpacity={0.8}
+              >
+                {txLoading ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <Text style={styles.actionBtnText}>
+                    Send {REWARD_AMOUNT_SOL} SOL Reward 🎁
+                  </Text>
+                )}
+              </TouchableOpacity>
+
+              {/* Send SOL */}
+              <TouchableOpacity
+                style={[styles.actionBtn, styles.actionBtnSecondary]}
+                onPress={() => router.push('/send')}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.actionBtnText, styles.actionBtnSecondaryText]}>
+                  Send SOL ↗
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Last Transaction */}
+            {lastTxSignature && (
+              <View style={[styles.card, darkMode && styles.cardDark]}>
+                <Text style={[styles.cardLabel, darkMode && styles.subtextDark]}>
+                  LAST TRANSACTION
+                </Text>
+                <Text
+                  style={[styles.signatureText, darkMode && styles.textDark]}
+                  numberOfLines={1}
+                >
+                  {lastTxSignature.slice(0, 20)}...
+                </Text>
+                <TouchableOpacity onPress={handleOpenExplorer}>
+                  <Text style={styles.explorerLink}>View on Solscan ↗</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.background },
-  containerDark: { backgroundColor: COLORS.backgroundDark },
-  scrollContent: { paddingHorizontal: 20, paddingBottom: 40 },
-  title: { fontSize: 28, fontWeight: '700', color: COLORS.primaryDark, paddingVertical: 16 },
-  titleDark: { color: COLORS.primaryLight },
-  networkBadge: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', backgroundColor: '#E8F5E9', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, marginBottom: 16 },
-  networkDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.success, marginRight: 8 },
-  networkText: { fontSize: 13, fontWeight: '600', color: COLORS.text },
-  card: { backgroundColor: COLORS.surface, borderRadius: 12, padding: 16, marginBottom: 12, elevation: 1, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 2 },
-  cardDark: { backgroundColor: COLORS.surfaceDark },
-  cardLabel: { fontSize: 12, fontWeight: '600', color: COLORS.textSecondary, letterSpacing: 1, marginBottom: 8 },
-  cardDescription: { fontSize: 14, color: COLORS.textSecondary, lineHeight: 20, marginBottom: 16 },
-  publicKey: { fontSize: 22, fontWeight: '700', color: COLORS.text, marginBottom: 4 },
-  fullKey: { fontSize: 12, color: COLORS.textSecondary, marginBottom: 12 },
-  walletLabel: { fontSize: 12, color: COLORS.textSecondary, marginBottom: 12 },
-  textDark: { color: COLORS.textDark },
-  subtextDark: { color: COLORS.textSecondaryDark },
-  connectBtn: { backgroundColor: COLORS.solana, borderRadius: 10, paddingVertical: 14, alignItems: 'center' },
-  connectBtnDisabled: { opacity: 0.6 },
-  connectBtnText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
-  disconnectBtn: { borderWidth: 1, borderColor: COLORS.error, borderRadius: 10, paddingVertical: 10, alignItems: 'center' },
-  disconnectText: { color: COLORS.error, fontSize: 14, fontWeight: '600' },
-  actionBtn: { backgroundColor: COLORS.primary, borderRadius: 10, paddingVertical: 14, alignItems: 'center', marginBottom: 8 },
-  sendSolBtn: { backgroundColor: '#FF6F00' },
-  actionBtnDisabled: { opacity: 0.6 },
-  actionBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
-  txSig: { fontSize: 13, fontFamily: 'monospace', color: COLORS.text, marginBottom: 8 },
-  viewTxBtn: { alignSelf: 'flex-start' },
-  viewTxText: { fontSize: 14, fontWeight: '600', color: COLORS.solana },
-  footer: { alignItems: 'center', marginTop: 32 },
-  footerText: { fontSize: 12, color: COLORS.textSecondary },
+  container: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+  },
+  containerDark: {
+    backgroundColor: COLORS.backgroundDark,
+  },
+  scrollContent: {
+    paddingHorizontal: 20,
+    paddingBottom: 40,
+  },
+  title: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: COLORS.primaryDark,
+    paddingVertical: 16,
+  },
+  titleDark: {
+    color: COLORS.primaryLight,
+  },
+  networkBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: '#E8F5E9',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    marginBottom: 16,
+  },
+  networkDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: COLORS.success,
+    marginRight: 8,
+  },
+  networkText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.text,
+  },
+  centerSection: {
+    alignItems: 'center',
+    paddingVertical: 48,
+  },
+  walletEmoji: {
+    fontSize: 64,
+    marginBottom: 16,
+  },
+  subtitle: {
+    fontSize: 15,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 22,
+    paddingHorizontal: 16,
+  },
+  subtextDark: {
+    color: COLORS.textSecondaryDark,
+  },
+  connectBtn: {
+    backgroundColor: COLORS.solana,
+    paddingHorizontal: 32,
+    paddingVertical: 16,
+    borderRadius: 28,
+    minWidth: 200,
+    alignItems: 'center',
+  },
+  connectBtnText: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  card: {
+    backgroundColor: COLORS.surface,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+  },
+  cardDark: {
+    backgroundColor: COLORS.surfaceDark,
+  },
+  cardLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+    letterSpacing: 1,
+    marginBottom: 8,
+  },
+  textDark: {
+    color: COLORS.textDark,
+  },
+  accountLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.text,
+    marginBottom: 4,
+  },
+  publicKeyText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: COLORS.text,
+    fontFamily: 'monospace',
+  },
+  balanceText: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    marginTop: 8,
+  },
+  walletActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 12,
+  },
+  refreshBtn: {
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  refreshBtnText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  disconnectBtn: {
+    backgroundColor: COLORS.error,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  disconnectBtnText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  actionBtn: {
+    backgroundColor: COLORS.solana,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  actionBtnDisabled: {
+    opacity: 0.6,
+  },
+  actionBtnText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  actionBtnSecondary: {
+    backgroundColor: 'transparent',
+    borderWidth: 1.5,
+    borderColor: COLORS.solana,
+  },
+  actionBtnSecondaryText: {
+    color: COLORS.solana,
+  },
+  signatureText: {
+    fontSize: 14,
+    fontFamily: 'monospace',
+    color: COLORS.text,
+    marginBottom: 8,
+  },
+  explorerLink: {
+    color: COLORS.solana,
+    fontSize: 14,
+    fontWeight: '600',
+  },
 });

@@ -25,6 +25,8 @@ import { getConnection } from '../src/solana/connection';
 import {
   authorizeWalletSession,
   extractSignature,
+  isLikelyInsufficientFunds,
+  isLikelyRpcFailure,
   isLikelyUserRejection,
   isLikelyWalletMissing,
   normalizeErrorMessage,
@@ -100,17 +102,11 @@ export default function SendScreen() {
     return null;
   }, [publicKey, recipient, amountText]);
 
-  const ensureBalance = useCallback(
-    async (payer: PublicKey, amountSol: number) => {
-      const connection = getConnection(cluster);
-      const lamports = await connection.getBalance(payer, 'confirmed');
-      const requiredLamports = Math.round(amountSol * LAMPORTS_PER_SOL) + 10_000;
-      if (lamports < requiredLamports) {
-        throw new Error('Insufficient SOL balance for amount plus network fee.');
-      }
-    },
-    [cluster],
-  );
+  const canSend =
+    !!publicKey &&
+    recipient.trim().length > 0 &&
+    amountText.trim().length > 0 &&
+    !sending;
 
   const handleSend = useCallback(async () => {
     if (sendingRef.current) return;
@@ -121,188 +117,160 @@ export default function SendScreen() {
       return;
     }
 
-    const trimmedRecipient = recipient.trim();
-    const amount = Number(amountText.trim());
-
     sendingRef.current = true;
     setSending(true);
 
     try {
-      const payerPubkey = new PublicKey(publicKey!);
-      const recipientPubkey = new PublicKey(trimmedRecipient);
-      await ensureBalance(payerPubkey, amount);
+      const payerPk = new PublicKey(publicKey!);
+      const recipientPk = new PublicKey(recipient.trim());
+      const amount = Number(amountText.trim());
 
-      const tx = await buildSendSOLTransaction(
-        payerPubkey,
-        recipientPubkey,
-        amount,
-        cluster,
-      );
+      // Balance check
+      const connection = getConnection(cluster);
+      const balance = await connection.getBalance(payerPk);
+      const spendLamports = Math.round(amount * LAMPORTS_PER_SOL) + 5000;
+      if (balance < spendLamports) {
+        Alert.alert(
+          'Insufficient SOL',
+          `You have ${(balance / LAMPORTS_PER_SOL).toFixed(6)} SOL but need ${(spendLamports / LAMPORTS_PER_SOL).toFixed(6)} SOL.`,
+        );
+        return;
+      }
 
-      const signatureResult = await transact(
+      const signatureStr = await transact(
         async (wallet: Web3MobileWallet) => {
-          const authorization = await authorizeWalletSession(wallet, cluster, authToken);
+          const auth = await authorizeWalletSession(wallet, cluster, authToken);
 
           setAuthorizationState({
-            publicKey: authorization.publicKey.toBase58(),
-            authToken: authorization.authToken,
-            walletUriBase: authorization.walletUriBase,
-            accountLabel: authorization.accountLabel,
+            publicKey: auth.publicKey.toBase58(),
+            authToken: auth.authToken,
+            walletUriBase: auth.walletUriBase,
+            accountLabel: auth.accountLabel,
           });
+
+          const tx = await buildSendSOLTransaction(
+            auth.publicKey,
+            recipientPk,
+            amount,
+            cluster,
+          );
 
           const signatures = await wallet.signAndSendTransactions({
             transactions: [tx],
           });
 
-          return signatures[0];
+          const sig = signatures[0];
+          if (!sig) throw new Error('Wallet returned no signature.');
+          return extractSignature(sig);
         },
         walletUriBase ? { baseUri: walletUriBase } : undefined,
       );
 
-      const sig = extractSignature(signatureResult);
+      setLastTxSignature(signatureStr);
 
-      setLastTxSignature(sig);
-      const confirmed = await confirmTransaction(sig, cluster);
+      const confirmed = await confirmTransaction(signatureStr, cluster);
 
-      const explorerUrl = getExplorerUrl(sig, cluster);
-      const statusMsg = confirmed
-        ? `Sent ${amount} SOL successfully!`
-        : 'Transaction submitted (pending confirmation).';
-
-      Alert.alert(
-        confirmed ? 'Transaction Sent! 🎉' : 'Transaction Submitted',
-        `${statusMsg}\n\nSignature: ${sig.slice(0, 20)}...`,
-        [
-          {
-            text: 'View on Solscan',
-            onPress: () => {
-              Linking.openURL(explorerUrl).catch(() => {});
+      if (confirmed) {
+        Alert.alert(
+          'Transaction Sent! 🎉',
+          `Successfully sent ${amount} SOL.`,
+          [
+            {
+              text: 'View on Solscan',
+              onPress: () =>
+                Linking.openURL(getExplorerUrl(signatureStr, cluster)),
             },
-          },
-          {
-            text: 'Done',
-            onPress: () => {
-              setRecipient('');
-              setAmountText('');
-              router.back();
-            },
-          },
-        ],
-      );
-    } catch (err: unknown) {
-      const message = normalizeErrorMessage(err);
-      console.error('[SendSOL] Error:', message);
-
-      if (message.toLowerCase().includes('insufficient')) {
-        Alert.alert(
-          'Insufficient Balance',
-          'You do not have enough SOL for this transaction (amount + network fee).',
-        );
-      } else if (isLikelyUserRejection(message)) {
-        Alert.alert(
-          'Transaction Cancelled',
-          'You cancelled the transaction in the wallet.',
-        );
-      } else if (isLikelyWalletMissing(message)) {
-        Alert.alert(
-          'Wallet Not Found',
-          'Please install Phantom, Solflare, or Backpack wallet.',
+            { text: 'Done', onPress: () => router.back() },
+          ],
         );
       } else {
-        Alert.alert('Transaction Error', message);
+        Alert.alert(
+          'Transaction Pending',
+          'Transaction sent but confirmation timed out. It may still succeed.',
+          [{ text: 'OK', onPress: () => router.back() }],
+        );
+      }
+    } catch (err: unknown) {
+      const message = normalizeErrorMessage(err);
+      console.error('[Send SOL] Error:', message);
+
+      if (isLikelyUserRejection(message)) {
+        Alert.alert('Cancelled', 'You cancelled the transaction.');
+      } else if (isLikelyWalletMissing(message)) {
+        Alert.alert('Wallet Not Found', 'No compatible wallet app detected.');
+      } else if (isLikelyInsufficientFunds(message)) {
+        Alert.alert('Insufficient SOL', message);
+      } else if (isLikelyRpcFailure(message)) {
+        Alert.alert('Network Error', 'Could not reach Solana devnet. Please try again.');
+      } else {
+        Alert.alert('Transaction Failed', message);
       }
     } finally {
       sendingRef.current = false;
       setSending(false);
     }
   }, [
-    amountText,
-    authToken,
-    cluster,
-    ensureBalance,
+    validate,
     publicKey,
     recipient,
+    amountText,
+    cluster,
+    authToken,
+    walletUriBase,
     setAuthorizationState,
     setLastTxSignature,
-    validate,
-    walletUriBase,
   ]);
-
-  const shortKey = publicKey
-    ? `${publicKey.slice(0, 6)}...${publicKey.slice(-4)}`
-    : null;
-
-  const canSend =
-    !!publicKey &&
-    recipient.trim().length > 0 &&
-    amountText.trim().length > 0 &&
-    !sending;
 
   return (
     <SafeAreaView style={[styles.container, darkMode && styles.containerDark]} edges={['top']}>
       <KeyboardAvoidingView
-        style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={{ flex: 1 }}
       >
+        {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
             <Text style={[styles.backText, darkMode && styles.backTextDark]}>← Back</Text>
           </TouchableOpacity>
           <Text style={[styles.title, darkMode && styles.titleDark]}>Send SOL</Text>
           <View style={styles.backBtn} />
         </View>
 
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
-        >
+        <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+          {/* Network Badge */}
           <View style={styles.networkBadge}>
             <View style={styles.networkDot} />
             <Text style={styles.networkText}>Devnet</Text>
           </View>
 
-          {publicKey ? (
-            <View style={[styles.card, darkMode && styles.cardDark]}>
-              <Text style={[styles.cardLabel, darkMode && styles.subtextDark]}>FROM</Text>
-              <Text style={[styles.senderKey, darkMode && styles.textDark]}>
-                {shortKey}
-              </Text>
-              <Text
-                style={[styles.fullKey, darkMode && styles.subtextDark]}
-                numberOfLines={1}
-                ellipsizeMode="middle"
-              >
-                {publicKey}
-              </Text>
-            </View>
-          ) : (
-            <View style={[styles.card, darkMode && styles.cardDark]}>
-              <Text style={[styles.cardLabel, darkMode && styles.subtextDark]}>
-                WALLET NOT CONNECTED
-              </Text>
-              <Text style={[styles.cardDescription, darkMode && styles.subtextDark]}>
-                Go to the Wallet tab and connect your wallet before sending SOL.
-              </Text>
-            </View>
-          )}
-
+          {/* Sender Info */}
           <View style={[styles.card, darkMode && styles.cardDark]}>
-            <Text style={[styles.cardLabel, darkMode && styles.subtextDark]}>TO</Text>
+            <Text style={[styles.cardLabel, darkMode && styles.subtextDark]}>FROM</Text>
+            <Text style={[styles.senderKey, darkMode && styles.textDark]} numberOfLines={1}>
+              {publicKey
+                ? `${publicKey.slice(0, 8)}...${publicKey.slice(-4)}`
+                : 'Not connected'}
+            </Text>
+          </View>
+
+          {/* Recipient */}
+          <View style={[styles.card, darkMode && styles.cardDark]}>
+            <Text style={[styles.cardLabel, darkMode && styles.subtextDark]}>
+              RECIPIENT ADDRESS
+            </Text>
             <TextInput
               style={[styles.input, darkMode && styles.inputDark]}
-              placeholder="Recipient Solana address"
-              placeholderTextColor={
-                darkMode ? COLORS.textSecondaryDark : COLORS.textSecondary
-              }
+              placeholder="Enter Solana address..."
+              placeholderTextColor={darkMode ? COLORS.textSecondaryDark : COLORS.textSecondary}
               value={recipient}
               onChangeText={setRecipient}
               autoCapitalize="none"
               autoCorrect={false}
               editable={!sending}
-              selectTextOnFocus
             />
           </View>
 
+          {/* Amount */}
           <View style={[styles.card, darkMode && styles.cardDark]}>
             <Text style={[styles.cardLabel, darkMode && styles.subtextDark]}>
               AMOUNT (SOL)
@@ -310,9 +278,7 @@ export default function SendScreen() {
             <TextInput
               style={[styles.input, darkMode && styles.inputDark]}
               placeholder="0.00"
-              placeholderTextColor={
-                darkMode ? COLORS.textSecondaryDark : COLORS.textSecondary
-              }
+              placeholderTextColor={darkMode ? COLORS.textSecondaryDark : COLORS.textSecondary}
               value={amountText}
               onChangeText={setAmountText}
               keyboardType="decimal-pad"
@@ -324,6 +290,7 @@ export default function SendScreen() {
             </Text>
           </View>
 
+          {/* Send Button */}
           <TouchableOpacity
             style={[styles.sendBtn, (!canSend || sending) && styles.sendBtnDisabled]}
             onPress={handleSend}
@@ -424,41 +391,28 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     marginBottom: 8,
   },
-  cardDescription: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    lineHeight: 20,
+  subtextDark: {
+    color: COLORS.textSecondaryDark,
+  },
+  textDark: {
+    color: COLORS.textDark,
   },
   senderKey: {
     fontSize: 18,
     fontWeight: '700',
     color: COLORS.text,
-    marginBottom: 4,
-  },
-  fullKey: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-  },
-  textDark: {
-    color: COLORS.textDark,
-  },
-  subtextDark: {
-    color: COLORS.textSecondaryDark,
+    fontFamily: 'monospace',
   },
   input: {
     fontSize: 16,
     color: COLORS.text,
-    backgroundColor: COLORS.background,
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderWidth: 1,
-    borderColor: COLORS.border,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+    paddingVertical: 8,
   },
   inputDark: {
     color: COLORS.textDark,
-    backgroundColor: COLORS.backgroundDark,
-    borderColor: COLORS.borderDark,
+    borderBottomColor: COLORS.borderDark,
   },
   feeNote: {
     fontSize: 12,
@@ -467,18 +421,17 @@ const styles = StyleSheet.create({
   },
   sendBtn: {
     backgroundColor: COLORS.solana,
-    borderRadius: 12,
     paddingVertical: 16,
+    borderRadius: 28,
     alignItems: 'center',
     marginTop: 8,
-    marginBottom: 12,
   },
   sendBtnDisabled: {
     opacity: 0.5,
   },
   sendBtnText: {
     color: '#FFFFFF',
-    fontSize: 17,
+    fontSize: 18,
     fontWeight: '700',
   },
 });
