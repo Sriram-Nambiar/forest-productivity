@@ -1,8 +1,8 @@
 import {
   transact,
-  Web3MobileWallet,
+  type Web3MobileWallet,
 } from '@solana-mobile/mobile-wallet-adapter-protocol-web3js';
-import { PublicKey } from '@solana/web3.js';
+import { LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js';
 import { router } from 'expo-router';
 import React, { useCallback, useRef, useState } from 'react';
 import {
@@ -21,21 +21,26 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { COLORS } from '../src/constants';
 import { getExplorerUrl } from '../src/solana/config';
-import { buildSendSOLTransaction, confirmTransaction } from '../src/solana/transactions';
+import { getConnection } from '../src/solana/connection';
+import {
+  authorizeWalletSession,
+  extractSignature,
+  isLikelyUserRejection,
+  isLikelyWalletMissing,
+  normalizeErrorMessage,
+} from '../src/solana/mobileWallet';
+import {
+  buildSendSOLTransaction,
+  confirmTransaction,
+} from '../src/solana/transactions';
 import { useSettingsStore } from '../src/store/settingsStore';
 import { useWalletStore } from '../src/store/walletStore';
-
-const APP_IDENTITY = {
-  name: 'Forest Focus Timer',
-  uri: 'https://forestfocus.app',
-  icon: 'favicon.png',
-};
 
 /** Validate a Solana base58 address */
 function isValidSolanaAddress(address: string): boolean {
   try {
-    const pk = new PublicKey(address);
-    return PublicKey.isOnCurve(pk.toBytes());
+    new PublicKey(address);
+    return true;
   } catch {
     return false;
   }
@@ -43,62 +48,70 @@ function isValidSolanaAddress(address: string): boolean {
 
 export default function SendScreen() {
   const darkMode = useSettingsStore((s) => s.darkMode);
-  const { publicKey, cluster } = useWalletStore();
+  const {
+    publicKey,
+    cluster,
+    authToken,
+    setAuthorizationState,
+    setLastTxSignature,
+  } = useWalletStore();
 
   const [recipient, setRecipient] = useState('');
   const [amountText, setAmountText] = useState('');
   const [sending, setSending] = useState(false);
   const sendingRef = useRef(false);
 
-  // ─── Validation ─────────────────────────────────────────────
   const validate = useCallback((): string | null => {
-    // Wallet connected?
     if (!publicKey) {
       return 'Wallet is not connected. Please connect your wallet first.';
     }
 
-    // Recipient empty?
     const trimmedRecipient = recipient.trim();
     if (!trimmedRecipient) {
       return 'Please enter a recipient address.';
     }
 
-    // Valid Solana address?
     if (!isValidSolanaAddress(trimmedRecipient)) {
       return 'Invalid Solana address. Please check the recipient address.';
     }
 
-    // Sending to self?
     if (trimmedRecipient === publicKey) {
       return 'You cannot send SOL to your own address.';
     }
 
-    // Amount empty?
     const trimmedAmount = amountText.trim();
     if (!trimmedAmount) {
       return 'Please enter an amount.';
     }
 
-    // Numeric?
     const amount = Number(trimmedAmount);
-    if (isNaN(amount)) {
+    if (!Number.isFinite(amount)) {
       return 'Amount must be a valid number.';
     }
 
-    // Positive?
     if (amount <= 0) {
       return 'Amount must be greater than 0.';
     }
 
-    // Reasonable max (prevent accidental huge transfers)
     if (amount > 1000) {
       return 'Amount exceeds maximum of 1000 SOL per transaction.';
     }
 
-    return null; // all good
+    return null;
   }, [publicKey, recipient, amountText]);
 
-  // ─── Send Transaction ───────────────────────────────────────
+  const ensureBalance = useCallback(
+    async (payer: PublicKey, amountSol: number) => {
+      const connection = getConnection(cluster);
+      const lamports = await connection.getBalance(payer, 'confirmed');
+      const requiredLamports = Math.round(amountSol * LAMPORTS_PER_SOL) + 10_000;
+      if (lamports < requiredLamports) {
+        throw new Error('Insufficient SOL balance for amount plus network fee.');
+      }
+    },
+    [cluster],
+  );
+
   const handleSend = useCallback(async () => {
     if (sendingRef.current) return;
 
@@ -117,6 +130,7 @@ export default function SendScreen() {
     try {
       const payerPubkey = new PublicKey(publicKey!);
       const recipientPubkey = new PublicKey(trimmedRecipient);
+      await ensureBalance(payerPubkey, amount);
 
       const tx = await buildSendSOLTransaction(
         payerPubkey,
@@ -125,71 +139,72 @@ export default function SendScreen() {
         cluster,
       );
 
-      const signedResult = await transact(
-        async (wallet: Web3MobileWallet) => {
-          await wallet.authorize({
-            identity: APP_IDENTITY,
-            cluster: cluster as 'devnet' | 'mainnet-beta',
-          });
+      const signatureResult = await transact(async (wallet: Web3MobileWallet) => {
+        const authorization = await authorizeWalletSession(wallet, cluster, authToken);
 
-          const signatures = await wallet.signAndSendTransactions({
-            transactions: [tx],
-          });
-          return signatures;
-        },
+        setAuthorizationState({
+          publicKey: authorization.publicKey.toBase58(),
+          authToken: authorization.authToken,
+          walletUriBase: authorization.walletUriBase,
+          accountLabel: authorization.accountLabel,
+        });
+
+        const signatures = await wallet.signAndSendTransactions({
+          transactions: [tx],
+        });
+
+        return signatures[0];
+      });
+
+      const sig = extractSignature(signatureResult);
+
+      setLastTxSignature(sig);
+      const confirmed = await confirmTransaction(sig, cluster);
+
+      const explorerUrl = getExplorerUrl(sig, cluster);
+      const statusMsg = confirmed
+        ? `Sent ${amount} SOL successfully!`
+        : 'Transaction submitted (pending confirmation).';
+
+      Alert.alert(
+        confirmed ? 'Transaction Sent! 🎉' : 'Transaction Submitted',
+        `${statusMsg}\n\nSignature: ${sig.slice(0, 20)}...`,
+        [
+          {
+            text: 'View on Solscan',
+            onPress: () => {
+              Linking.openURL(explorerUrl).catch(() => {});
+            },
+          },
+          {
+            text: 'Done',
+            onPress: () => {
+              setRecipient('');
+              setAmountText('');
+              router.back();
+            },
+          },
+        ],
       );
-
-      if (signedResult?.[0]) {
-        const sig =
-          typeof signedResult[0] === 'string'
-            ? signedResult[0]
-            : Buffer.from(signedResult[0] as Uint8Array).toString('base64');
-
-        // Store in wallet store
-        useWalletStore.getState().setLastTxSignature(sig);
-
-        // Attempt confirmation
-        const confirmed = await confirmTransaction(sig, cluster);
-
-        const explorerUrl = getExplorerUrl(sig, cluster);
-        const statusMsg = confirmed
-          ? `Sent ${amount} SOL successfully!`
-          : `Transaction submitted (pending confirmation).`;
-
-        Alert.alert(
-          confirmed ? 'Transaction Sent! 🎉' : 'Transaction Submitted',
-          `${statusMsg}\n\nSignature: ${sig.slice(0, 20)}...`,
-          [
-            {
-              text: 'View on Solscan',
-              onPress: () => {
-                Linking.openURL(explorerUrl).catch(() => {});
-              },
-            },
-            {
-              text: 'Done',
-              onPress: () => {
-                setRecipient('');
-                setAmountText('');
-                router.back();
-              },
-            },
-          ],
-        );
-      }
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = normalizeErrorMessage(err);
       console.error('[SendSOL] Error:', message);
 
-      if (message.includes('insufficient') || message.includes('balance')) {
+      if (message.toLowerCase().includes('insufficient')) {
         Alert.alert(
           'Insufficient Balance',
           'You do not have enough SOL for this transaction (amount + network fee).',
         );
-      } else if (message.includes('cancel') || message.includes('reject') || message.includes('declined')) {
-        Alert.alert('Transaction Cancelled', 'You cancelled the transaction in the wallet.');
-      } else if (message.includes('not found') || message.includes('No compatible wallet')) {
-        Alert.alert('Wallet Not Found', 'Please install Phantom or another Solana wallet.');
+      } else if (isLikelyUserRejection(message)) {
+        Alert.alert(
+          'Transaction Cancelled',
+          'You cancelled the transaction in the wallet.',
+        );
+      } else if (isLikelyWalletMissing(message)) {
+        Alert.alert(
+          'Wallet Not Found',
+          'Please install Phantom, Solflare, or Backpack wallet.',
+        );
       } else {
         Alert.alert('Transaction Error', message);
       }
@@ -197,14 +212,27 @@ export default function SendScreen() {
       sendingRef.current = false;
       setSending(false);
     }
-  }, [validate, publicKey, recipient, amountText, cluster]);
+  }, [
+    amountText,
+    authToken,
+    cluster,
+    ensureBalance,
+    publicKey,
+    recipient,
+    setAuthorizationState,
+    setLastTxSignature,
+    validate,
+  ]);
 
-  // ─── Computed UI State ──────────────────────────────────────
   const shortKey = publicKey
     ? `${publicKey.slice(0, 6)}...${publicKey.slice(-4)}`
     : null;
 
-  const canSend = !!publicKey && recipient.trim().length > 0 && amountText.trim().length > 0 && !sending;
+  const canSend =
+    !!publicKey &&
+    recipient.trim().length > 0 &&
+    amountText.trim().length > 0 &&
+    !sending;
 
   return (
     <SafeAreaView style={[styles.container, darkMode && styles.containerDark]} edges={['top']}>
@@ -212,7 +240,6 @@ export default function SendScreen() {
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
             <Text style={[styles.backText, darkMode && styles.backTextDark]}>← Back</Text>
@@ -225,7 +252,6 @@ export default function SendScreen() {
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
         >
-          {/* Network Badge */}
           <View
             style={[
               styles.networkBadge,
@@ -243,7 +269,6 @@ export default function SendScreen() {
             </Text>
           </View>
 
-          {/* Sender Info */}
           {publicKey ? (
             <View style={[styles.card, darkMode && styles.cardDark]}>
               <Text style={[styles.cardLabel, darkMode && styles.subtextDark]}>FROM</Text>
@@ -269,13 +294,14 @@ export default function SendScreen() {
             </View>
           )}
 
-          {/* Recipient Input */}
           <View style={[styles.card, darkMode && styles.cardDark]}>
             <Text style={[styles.cardLabel, darkMode && styles.subtextDark]}>TO</Text>
             <TextInput
               style={[styles.input, darkMode && styles.inputDark]}
               placeholder="Recipient Solana address"
-              placeholderTextColor={darkMode ? COLORS.textSecondaryDark : COLORS.textSecondary}
+              placeholderTextColor={
+                darkMode ? COLORS.textSecondaryDark : COLORS.textSecondary
+              }
               value={recipient}
               onChangeText={setRecipient}
               autoCapitalize="none"
@@ -285,13 +311,16 @@ export default function SendScreen() {
             />
           </View>
 
-          {/* Amount Input */}
           <View style={[styles.card, darkMode && styles.cardDark]}>
-            <Text style={[styles.cardLabel, darkMode && styles.subtextDark]}>AMOUNT (SOL)</Text>
+            <Text style={[styles.cardLabel, darkMode && styles.subtextDark]}>
+              AMOUNT (SOL)
+            </Text>
             <TextInput
               style={[styles.input, darkMode && styles.inputDark]}
               placeholder="0.00"
-              placeholderTextColor={darkMode ? COLORS.textSecondaryDark : COLORS.textSecondary}
+              placeholderTextColor={
+                darkMode ? COLORS.textSecondaryDark : COLORS.textSecondary
+              }
               value={amountText}
               onChangeText={setAmountText}
               keyboardType="decimal-pad"
@@ -303,12 +332,8 @@ export default function SendScreen() {
             </Text>
           </View>
 
-          {/* Send Button */}
           <TouchableOpacity
-            style={[
-              styles.sendBtn,
-              (!canSend || sending) && styles.sendBtnDisabled,
-            ]}
+            style={[styles.sendBtn, (!canSend || sending) && styles.sendBtnDisabled]}
             onPress={handleSend}
             disabled={!canSend || sending}
             activeOpacity={0.8}
@@ -316,13 +341,10 @@ export default function SendScreen() {
             {sending ? (
               <ActivityIndicator color="#FFFFFF" size="small" />
             ) : (
-              <Text style={styles.sendBtnText}>
-                Send {amountText.trim() || '0'} SOL
-              </Text>
+              <Text style={styles.sendBtnText}>Send {amountText.trim() || '0'} SOL</Text>
             )}
           </TouchableOpacity>
 
-          {/* Mainnet Warning */}
           {cluster === 'mainnet-beta' && (
             <View style={styles.warningCard}>
               <Text style={styles.warningText}>

@@ -6,6 +6,12 @@ import { safeGetItem, safeSetItem } from "../utils/storage";
 interface WalletState {
   /** Base58-encoded public key (null when disconnected) */
   publicKey: string | null;
+  /** Active auth token returned by MWA authorize() */
+  authToken: string | null;
+  /** Wallet URI base returned by MWA authorize() */
+  walletUriBase: string | null;
+  /** Wallet account label */
+  accountLabel: string | null;
   /** Currently selected Solana cluster */
   cluster: SolanaCluster;
   /** Whether a wallet operation is in progress */
@@ -20,12 +26,22 @@ interface WalletState {
   setConnecting: (value: boolean) => void;
   setLastRewardTimestamp: (ts: number) => void;
   setLastTxSignature: (sig: string | null) => void;
+  setAuthorizationState: (params: {
+    publicKey: string;
+    authToken: string;
+    walletUriBase: string;
+    accountLabel: string | null;
+  }) => void;
+  clearAuthorization: () => void;
   loadWalletSettings: () => Promise<void>;
   disconnect: () => void;
 }
 
-export const useWalletStore = create<WalletState>((set, get) => ({
+export const useWalletStore = create<WalletState>((set) => ({
   publicKey: null,
+  authToken: null,
+  walletUriBase: null,
+  accountLabel: null,
   cluster: DEFAULT_CLUSTER,
   connecting: false,
   lastRewardTimestamp: 0,
@@ -35,8 +51,39 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     set({ publicKey: key });
   },
 
+  setAuthorizationState: ({
+    publicKey,
+    authToken,
+    walletUriBase,
+    accountLabel,
+  }) => {
+    set({
+      publicKey,
+      authToken,
+      walletUriBase,
+      accountLabel,
+    });
+  },
+
+  clearAuthorization: () => {
+    set({
+      publicKey: null,
+      authToken: null,
+      walletUriBase: null,
+      accountLabel: null,
+      lastTxSignature: null,
+    });
+  },
+
   setCluster: (cluster: SolanaCluster) => {
-    set({ cluster, publicKey: null, lastTxSignature: null });
+    set({
+      cluster,
+      publicKey: null,
+      authToken: null,
+      walletUriBase: null,
+      accountLabel: null,
+      lastTxSignature: null,
+    });
     safeSetItem(STORAGE_KEYS.WALLET_CLUSTER, cluster);
   },
 
@@ -60,6 +107,13 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   },
 
   disconnect: () => {
-    set({ publicKey: null, connecting: false, lastTxSignature: null });
+    set({
+      publicKey: null,
+      authToken: null,
+      walletUriBase: null,
+      accountLabel: null,
+      connecting: false,
+      lastTxSignature: null,
+    });
   },
 }));

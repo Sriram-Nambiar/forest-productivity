@@ -22,6 +22,13 @@ export interface TransactionResult {
   cluster: SolanaCluster;
 }
 
+function solToLamports(amountSol: number): number {
+  if (!Number.isFinite(amountSol) || amountSol <= 0) {
+    throw new Error("Transfer amount must be greater than zero.");
+  }
+  return Math.round(amountSol * LAMPORTS_PER_SOL);
+}
+
 /**
  * Build a SOL transfer transaction to the treasury wallet.
  */
@@ -45,7 +52,7 @@ export async function buildRewardTransaction(
     SystemProgram.transfer({
       fromPubkey: payerPublicKey,
       toPubkey: treasury,
-      lamports: Math.round(REWARD_AMOUNT_SOL * LAMPORTS_PER_SOL),
+      lamports: solToLamports(REWARD_AMOUNT_SOL),
     }),
   );
 
@@ -60,6 +67,10 @@ export async function buildMemoTransaction(
   cluster: SolanaCluster,
   durationMinutes: number,
 ): Promise<Transaction> {
+  if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) {
+    throw new Error("Memo duration must be greater than zero minutes.");
+  }
+
   const connection = getConnection(cluster);
 
   const { blockhash, lastValidBlockHeight } =
@@ -109,7 +120,7 @@ export async function buildSendSOLTransaction(
     SystemProgram.transfer({
       fromPubkey: payerPublicKey,
       toPubkey: recipientPublicKey,
-      lamports: Math.round(amountSOL * LAMPORTS_PER_SOL),
+      lamports: solToLamports(amountSOL),
     }),
   );
 
@@ -125,12 +136,7 @@ export async function confirmTransaction(
 ): Promise<boolean> {
   const connection = getConnection(cluster);
   try {
-    const { blockhash, lastValidBlockHeight } =
-      await connection.getLatestBlockhash("confirmed");
-    const result = await connection.confirmTransaction(
-      { signature, blockhash, lastValidBlockHeight },
-      "confirmed",
-    );
+    const result = await connection.confirmTransaction(signature, "confirmed");
     return !result.value.err;
   } catch (error) {
     console.error("[confirmTransaction] Error:", error);

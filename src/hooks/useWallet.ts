@@ -1,130 +1,114 @@
 import {
   transact,
-  Web3MobileWallet,
+  type Web3MobileWallet,
 } from "@solana-mobile/mobile-wallet-adapter-protocol-web3js";
+import { LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
+import { useCallback, useMemo, useState } from "react";
+import { getConnection } from "../solana/connection";
 import {
-  clusterApiUrl,
-  Connection,
-  LAMPORTS_PER_SOL,
-  PublicKey,
-  SystemProgram,
-  Transaction,
-} from "@solana/web3.js";
-import { useCallback, useState } from "react";
+  authorizeWalletSession,
+  extractSignature,
+  normalizeErrorMessage,
+} from "../solana/mobileWallet";
+import { buildSendSOLTransaction } from "../solana/transactions";
 import { useWalletStore } from "../store/walletStore";
 
-const APP_IDENTITY = {
-  name: "SolScan",
-  uri: "https://solscan.io",
-  icon: "favicon.ico",
-};
-
 export function useWallet() {
-  const [publicKey, setPublicKey] = useState<PublicKey | null>(null);
+  const {
+    publicKey,
+    cluster,
+    authToken,
+    setAuthorizationState,
+    disconnect,
+    setLastTxSignature,
+  } = useWalletStore();
+
   const [connecting, setConnecting] = useState(false);
   const [sending, setSending] = useState(false);
-  const isDevnet = useWalletStore((s) => s.isDevnet);
+  const connection = useMemo(() => getConnection(cluster), [cluster]);
 
-  const cluster = isDevnet ? "devnet" : "mainnet-beta";
-  const connection = new Connection(clusterApiUrl(cluster), "confirmed");
-
-  // ============================================
-  // CONNECT — Ask Phantom to authorize our app
-  // ============================================
   const connect = useCallback(async () => {
     setConnecting(true);
     try {
-      const authResult = await transact(async (wallet: Web3MobileWallet) => {
-        // This opens Phantom, shows an "Authorize" dialog
-        // User taps "Approve" → we get their public key
-        const result = await wallet.authorize({
-          chain: `solana:${cluster}`,
-          identity: APP_IDENTITY,
-        });
-        return result;
+      const authorization = await transact(async (wallet: Web3MobileWallet) => {
+        return authorizeWalletSession(wallet, cluster, authToken);
       });
 
-      // authResult.accounts[0].address is a base64 public key
-      const pubkey = new PublicKey(
-        Buffer.from(authResult.accounts[0].address, "base64"),
-      );
-      setPublicKey(pubkey);
-      return pubkey;
-    } catch (error: any) {
-      console.error("Connect failed:", error);
-      throw error;
+      setAuthorizationState({
+        publicKey: authorization.publicKey.toBase58(),
+        authToken: authorization.authToken,
+        walletUriBase: authorization.walletUriBase,
+        accountLabel: authorization.accountLabel,
+      });
+
+      return authorization.publicKey;
     } finally {
       setConnecting(false);
     }
-  }, [cluster]);
+  }, [authToken, cluster, setAuthorizationState]);
 
-  // ============================================
-  // DISCONNECT
-  // ============================================
-  const disconnect = useCallback(() => {
-    setPublicKey(null);
-  }, []);
-
-  // ============================================
-  // GET BALANCE
-  // ============================================
   const getBalance = useCallback(async () => {
     if (!publicKey) return 0;
-    const balance = await connection.getBalance(publicKey);
-    return balance / LAMPORTS_PER_SOL;
-  }, [publicKey, connection]);
 
-  // ============================================
-  // SEND SOL — Build, sign, and send a transaction
-  // ============================================
+    const balance = await connection.getBalance(
+      new PublicKey(publicKey),
+      "confirmed",
+    );
+    return balance / LAMPORTS_PER_SOL;
+  }, [connection, publicKey]);
+
   const sendSOL = useCallback(
     async (toAddress: string, amountSOL: number) => {
       if (!publicKey) throw new Error("Wallet not connected");
 
       setSending(true);
       try {
-        // Step 1: Build the transaction
-        const toPublicKey = new PublicKey(toAddress);
-        const transaction = new Transaction().add(
-          SystemProgram.transfer({
-            fromPubkey: publicKey,
-            toPubkey: toPublicKey,
-            lamports: Math.round(amountSOL * LAMPORTS_PER_SOL),
-          }),
+        const payer = new PublicKey(publicKey);
+        const recipient = new PublicKey(toAddress);
+        const transaction = await buildSendSOLTransaction(
+          payer,
+          recipient,
+          amountSOL,
+          cluster,
         );
 
-        // Step 2: Get recent blockhash (needed for transaction)
-        const { blockhash } = await connection.getLatestBlockhash();
-        transaction.recentBlockhash = blockhash;
-        transaction.feePayer = publicKey;
+        const signatureResult = await transact(
+          async (wallet: Web3MobileWallet) => {
+            const authorization = await authorizeWalletSession(
+              wallet,
+              cluster,
+              authToken,
+            );
 
-        // Step 3: Send to Phantom for signing + submission
-        const txSignature = await transact(async (wallet: Web3MobileWallet) => {
-          // Re-authorize (Phantom needs this each session)
-          await wallet.authorize({
-            chain: `solana:${cluster}`,
-            identity: APP_IDENTITY,
-          });
+            setAuthorizationState({
+              publicKey: authorization.publicKey.toBase58(),
+              authToken: authorization.authToken,
+              walletUriBase: authorization.walletUriBase,
+              accountLabel: authorization.accountLabel,
+            });
 
-          // Sign and send — Phantom shows the transaction details
-          // User approves → Phantom signs → sends to network
-          const signatures = await wallet.signAndSendTransactions({
-            transactions: [transaction],
-          });
+            const signatures = await wallet.signAndSendTransactions({
+              transactions: [transaction],
+            });
 
-          return signatures[0];
-        });
+            return signatures[0];
+          },
+        );
 
-        return txSignature;
+        const signature = extractSignature(signatureResult);
+        setLastTxSignature(signature);
+        return signature;
+      } catch (error) {
+        throw new Error(normalizeErrorMessage(error));
       } finally {
         setSending(false);
       }
     },
-    [publicKey, connection, cluster],
+    [authToken, cluster, publicKey, setAuthorizationState, setLastTxSignature],
   );
 
   return {
-    publicKey,
+    publicKey: publicKey ? new PublicKey(publicKey) : null,
     connected: !!publicKey,
     connecting,
     sending,

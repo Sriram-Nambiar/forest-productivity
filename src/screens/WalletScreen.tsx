@@ -1,9 +1,8 @@
 import {
   transact,
-  Web3MobileWallet,
+  type Web3MobileWallet,
 } from '@solana-mobile/mobile-wallet-adapter-protocol-web3js';
-import { PublicKey } from '@solana/web3.js';
-import bs58 from 'bs58';
+import { LAMPORTS_PER_SOL, PublicKey, Transaction } from '@solana/web3.js';
 import { router } from 'expo-router';
 import React, { useCallback, useRef, useState } from 'react';
 import {
@@ -24,38 +23,39 @@ import {
   REWARD_COOLDOWN_MS,
   type SolanaCluster,
 } from '../solana/config';
-import { buildMemoTransaction, buildRewardTransaction, confirmTransaction } from '../solana/transactions';
+import { getConnection } from '../solana/connection';
+import {
+  APP_IDENTITY,
+  authorizeWalletSession,
+  extractSignature,
+  isLikelyUserRejection,
+  isLikelyWalletMissing,
+  normalizeErrorMessage,
+} from '../solana/mobileWallet';
+import {
+  buildMemoTransaction,
+  buildRewardTransaction,
+  confirmTransaction,
+} from '../solana/transactions';
 import { useSettingsStore } from '../store/settingsStore';
 import { useWalletStore } from '../store/walletStore';
-
-const APP_IDENTITY = {
-  name: 'Forest Focus Timer',
-  uri: 'https://forestfocus.app',
-  icon: 'favicon.png',
-};
-
-/**
- * Convert a MWA signAndSendTransactions result entry to a base58 signature string.
- * MWA returns Uint8Array[] of raw signature bytes.
- */
-function extractSignature(result: string | Uint8Array): string {
-  if (typeof result === 'string') return result;
-  return bs58.encode(Buffer.from(result));
-}
 
 export default function WalletScreen() {
   const darkMode = useSettingsStore((s) => s.darkMode);
   const {
     publicKey,
+    authToken,
     cluster,
     connecting,
     lastTxSignature,
     lastRewardTimestamp,
-    setPublicKey,
+    accountLabel,
     setCluster,
     setConnecting,
     setLastTxSignature,
     setLastRewardTimestamp,
+    setAuthorizationState,
+    disconnect,
   } = useWalletStore();
 
   const [txLoading, setTxLoading] = useState(false);
@@ -63,31 +63,29 @@ export default function WalletScreen() {
 
   const handleConnect = useCallback(async () => {
     if (connecting) return;
+
     setConnecting(true);
     try {
-      const authorizationResult = await transact(
-        async (wallet: Web3MobileWallet) => {
-          return await wallet.authorize({
-            identity: APP_IDENTITY,
-            cluster: cluster as 'devnet' | 'mainnet-beta',
-          });
-        },
-      );
+      const authorization = await transact(async (wallet: Web3MobileWallet) => {
+        return authorizeWalletSession(wallet, cluster, authToken);
+      });
 
-      if (authorizationResult?.accounts?.[0]) {
-        const pubkeyBytes = authorizationResult.accounts[0].address;
-        const pubkey = new PublicKey(pubkeyBytes);
-        setPublicKey(pubkey.toBase58());
-      }
+      setAuthorizationState({
+        publicKey: authorization.publicKey.toBase58(),
+        authToken: authorization.authToken,
+        walletUriBase: authorization.walletUriBase,
+        accountLabel: authorization.accountLabel,
+      });
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
+      const message = normalizeErrorMessage(error);
       console.error('[Wallet Connect] Error:', message);
-      if (message.includes('cancel') || message.includes('reject') || message.includes('declined')) {
-        Alert.alert('Connection Cancelled', 'You cancelled the wallet connection.');
-      } else if (message.includes('not found') || message.includes('not installed') || message.includes('No compatible wallet')) {
+
+      if (isLikelyUserRejection(message)) {
+        Alert.alert('Connection Cancelled', 'You cancelled wallet authorization.');
+      } else if (isLikelyWalletMissing(message)) {
         Alert.alert(
           'Wallet Not Found',
-          'Please install a Solana wallet app (e.g., Phantom, Solflare) to connect.',
+          'Please install a Solana wallet app (Phantom, Solflare, or Backpack) and try again.',
         );
       } else {
         Alert.alert('Connection Error', `Failed to connect wallet: ${message}`);
@@ -95,7 +93,7 @@ export default function WalletScreen() {
     } finally {
       setConnecting(false);
     }
-  }, [connecting, cluster, setPublicKey, setConnecting]);
+  }, [authToken, cluster, connecting, setAuthorizationState, setConnecting]);
 
   const handleDisconnect = useCallback(() => {
     Alert.alert('Disconnect Wallet', 'Are you sure you want to disconnect?', [
@@ -103,63 +101,108 @@ export default function WalletScreen() {
       {
         text: 'Disconnect',
         style: 'destructive',
-        onPress: () => {
-          useWalletStore.getState().disconnect();
-        },
+        onPress: () => disconnect(),
       },
     ]);
-  }, []);
+  }, [disconnect]);
+
+  const ensureSolBalance = useCallback(
+    async (payer: PublicKey, estimatedSpendLamports: number): Promise<void> => {
+      const connection = getConnection(cluster);
+      const currentLamports = await connection.getBalance(payer, 'confirmed');
+      // Include a small fee buffer for rent/fee fluctuations.
+      const safetyBuffer = 10_000;
+      if (currentLamports < estimatedSpendLamports + safetyBuffer) {
+        throw new Error('Insufficient SOL balance for amount plus network fee.');
+      }
+    },
+    [cluster],
+  );
+
+  const executeWalletTransaction = useCallback(
+    async (
+      txBuilder: (payer: PublicKey) => Promise<Transaction>,
+      opts?: { requireBalanceLamports?: number },
+    ): Promise<string> => {
+      if (!publicKey) {
+        throw new Error('Wallet not connected.');
+      }
+
+      const payerPubkey = new PublicKey(publicKey);
+      if (opts?.requireBalanceLamports) {
+        await ensureSolBalance(payerPubkey, opts.requireBalanceLamports);
+      }
+
+      const tx = await txBuilder(payerPubkey);
+
+      const signatureResult = await transact(async (wallet: Web3MobileWallet) => {
+        const authorization = await authorizeWalletSession(wallet, cluster, authToken);
+
+        setAuthorizationState({
+          publicKey: authorization.publicKey.toBase58(),
+          authToken: authorization.authToken,
+          walletUriBase: authorization.walletUriBase,
+          accountLabel: authorization.accountLabel,
+        });
+
+        const signatures = await wallet.signAndSendTransactions({
+          transactions: [tx],
+        });
+        return signatures[0];
+      });
+
+      const signature = extractSignature(signatureResult);
+      setLastTxSignature(signature);
+      return signature;
+    },
+    [authToken, cluster, ensureSolBalance, publicKey, setAuthorizationState, setLastTxSignature],
+  );
 
   const handleSendReward = useCallback(async () => {
     if (!publicKey || txInProgressRef.current) return;
 
     const now = Date.now();
     if (now - lastRewardTimestamp < REWARD_COOLDOWN_MS) {
-      const waitSec = Math.ceil((REWARD_COOLDOWN_MS - (now - lastRewardTimestamp)) / 1000);
+      const waitSec = Math.ceil(
+        (REWARD_COOLDOWN_MS - (now - lastRewardTimestamp)) / 1000,
+      );
       Alert.alert('Please Wait', `You can send another reward in ${waitSec} seconds.`);
       return;
     }
 
     txInProgressRef.current = true;
     setTxLoading(true);
+
     try {
-      const payerPubkey = new PublicKey(publicKey);
-      const rewardTx = await buildRewardTransaction(payerPubkey, cluster);
-
-      const signedResult = await transact(
-        async (wallet: Web3MobileWallet) => {
-          await wallet.authorize({
-            identity: APP_IDENTITY,
-            cluster: cluster as 'devnet' | 'mainnet-beta',
-          });
-
-          const signedTransactions = await wallet.signAndSendTransactions({
-            transactions: [rewardTx],
-          });
-          return signedTransactions;
-        },
+      const sig = await executeWalletTransaction(
+        (payer) => buildRewardTransaction(payer, cluster),
+        { requireBalanceLamports: Math.round(REWARD_AMOUNT_SOL * LAMPORTS_PER_SOL) },
       );
 
-      if (signedResult?.[0]) {
-        const sig = extractSignature(signedResult[0]);
+      setLastRewardTimestamp(Date.now());
 
-        setLastTxSignature(sig);
-        setLastRewardTimestamp(Date.now());
-
-        const confirmed = await confirmTransaction(sig, cluster);
-        if (confirmed) {
-          Alert.alert('Reward Sent! 🎉', `Sent ${REWARD_AMOUNT_SOL} SOL to treasury.\nSignature: ${sig.slice(0, 16)}...`);
-        } else {
-          Alert.alert('Pending', 'Transaction submitted but not yet confirmed.');
-        }
+      const confirmed = await confirmTransaction(sig, cluster);
+      if (confirmed) {
+        Alert.alert(
+          'Reward Sent! 🎉',
+          `Sent ${REWARD_AMOUNT_SOL} SOL to treasury.\nSignature: ${sig.slice(0, 16)}...`,
+        );
+      } else {
+        Alert.alert('Pending', 'Transaction submitted but not yet confirmed.');
       }
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
+      const message = normalizeErrorMessage(error);
       console.error('[Send Reward] Error:', message);
-      if (message.includes('insufficient') || message.includes('balance')) {
-        Alert.alert('Insufficient Balance', 'You do not have enough SOL for this transaction.');
-      } else if (message.includes('cancel') || message.includes('reject') || message.includes('declined')) {
+
+      if (message.toLowerCase().includes('insufficient')) {
+        Alert.alert(
+          'Insufficient Balance',
+          'You do not have enough SOL for this transaction (including network fee).',
+        );
+      } else if (isLikelyUserRejection(message)) {
         Alert.alert('Transaction Cancelled', 'You cancelled the transaction.');
+      } else if (isLikelyWalletMissing(message)) {
+        Alert.alert('Wallet Not Found', 'No compatible Solana wallet app is installed.');
       } else {
         Alert.alert('Transaction Error', message);
       }
@@ -167,7 +210,13 @@ export default function WalletScreen() {
       txInProgressRef.current = false;
       setTxLoading(false);
     }
-  }, [publicKey, cluster, lastRewardTimestamp, setLastTxSignature, setLastRewardTimestamp]);
+  }, [
+    cluster,
+    executeWalletTransaction,
+    lastRewardTimestamp,
+    publicKey,
+    setLastRewardTimestamp,
+  ]);
 
   const handleSendMemo = useCallback(async () => {
     if (!publicKey || txInProgressRef.current) return;
@@ -175,38 +224,29 @@ export default function WalletScreen() {
     txInProgressRef.current = true;
     setTxLoading(true);
     try {
-      const payerPubkey = new PublicKey(publicKey);
-      const memoTx = await buildMemoTransaction(payerPubkey, cluster, 25);
-
-      const signedResult = await transact(
-        async (wallet: Web3MobileWallet) => {
-          await wallet.authorize({
-            identity: APP_IDENTITY,
-            cluster: cluster as 'devnet' | 'mainnet-beta',
-          });
-
-          const signedTransactions = await wallet.signAndSendTransactions({
-            transactions: [memoTx],
-          });
-          return signedTransactions;
-        },
+      const sig = await executeWalletTransaction((payer) =>
+        buildMemoTransaction(payer, cluster, 25),
       );
 
-      if (signedResult?.[0]) {
-        const sig = extractSignature(signedResult[0]);
-
-        setLastTxSignature(sig);
-        Alert.alert('Memo Recorded! 📝', `Focus proof written on-chain.\nSignature: ${sig.slice(0, 16)}...`);
-      }
+      const confirmed = await confirmTransaction(sig, cluster);
+      Alert.alert(
+        confirmed ? 'Memo Recorded! 📝' : 'Memo Submitted',
+        `Focus proof ${confirmed ? 'written on-chain' : 'submitted (pending confirmation)'}.\nSignature: ${sig.slice(0, 16)}...`,
+      );
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
+      const message = normalizeErrorMessage(error);
       console.error('[Send Memo] Error:', message);
-      Alert.alert('Memo Error', message);
+
+      if (isLikelyUserRejection(message)) {
+        Alert.alert('Transaction Cancelled', 'You cancelled the memo transaction.');
+      } else {
+        Alert.alert('Memo Error', message);
+      }
     } finally {
       txInProgressRef.current = false;
       setTxLoading(false);
     }
-  }, [publicKey, cluster, setLastTxSignature]);
+  }, [cluster, executeWalletTransaction, publicKey]);
 
   const handleViewTx = useCallback(() => {
     if (!lastTxSignature) return;
@@ -240,34 +280,53 @@ export default function WalletScreen() {
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <Text style={[styles.title, darkMode && styles.titleDark]}>Wallet</Text>
 
-        {/* Network Badge */}
         <TouchableOpacity
-          style={[styles.networkBadge, cluster === 'mainnet-beta' && styles.networkBadgeMainnet]}
+          style={[
+            styles.networkBadge,
+            cluster === 'mainnet-beta' && styles.networkBadgeMainnet,
+          ]}
           onPress={handleToggleCluster}
           activeOpacity={0.7}
         >
-          <View style={[styles.networkDot, cluster === 'mainnet-beta' && styles.networkDotMainnet]} />
+          <View
+            style={[
+              styles.networkDot,
+              cluster === 'mainnet-beta' && styles.networkDotMainnet,
+            ]}
+          />
           <Text style={styles.networkText}>
             {cluster === 'devnet' ? 'Devnet' : 'Mainnet'}
           </Text>
         </TouchableOpacity>
 
-        {/* Connection Card */}
         <View style={[styles.card, darkMode && styles.cardDark]}>
           {publicKey ? (
             <>
-              <Text style={[styles.cardLabel, darkMode && styles.subtextDark]}>CONNECTED</Text>
+              <Text style={[styles.cardLabel, darkMode && styles.subtextDark]}>
+                CONNECTED
+              </Text>
               <Text style={[styles.publicKey, darkMode && styles.textDark]}>{shortKey}</Text>
-              <Text style={[styles.fullKey, darkMode && styles.subtextDark]} numberOfLines={1} ellipsizeMode="middle">
+              <Text
+                style={[styles.fullKey, darkMode && styles.subtextDark]}
+                numberOfLines={1}
+                ellipsizeMode="middle"
+              >
                 {publicKey}
               </Text>
+              {!!accountLabel && (
+                <Text style={[styles.walletLabel, darkMode && styles.subtextDark]}>
+                  Wallet: {accountLabel}
+                </Text>
+              )}
               <TouchableOpacity style={styles.disconnectBtn} onPress={handleDisconnect}>
                 <Text style={styles.disconnectText}>Disconnect</Text>
               </TouchableOpacity>
             </>
           ) : (
             <>
-              <Text style={[styles.cardLabel, darkMode && styles.subtextDark]}>NOT CONNECTED</Text>
+              <Text style={[styles.cardLabel, darkMode && styles.subtextDark]}>
+                NOT CONNECTED
+              </Text>
               <Text style={[styles.cardDescription, darkMode && styles.subtextDark]}>
                 Connect a Solana wallet to send rewards and record focus proofs on-chain.
               </Text>
@@ -287,10 +346,11 @@ export default function WalletScreen() {
           )}
         </View>
 
-        {/* Actions */}
         {publicKey && (
           <View style={[styles.card, darkMode && styles.cardDark]}>
-            <Text style={[styles.cardLabel, darkMode && styles.subtextDark]}>ACTIONS</Text>
+            <Text style={[styles.cardLabel, darkMode && styles.subtextDark]}>
+              ACTIONS
+            </Text>
 
             <TouchableOpacity
               style={[styles.actionBtn, txLoading && styles.actionBtnDisabled]}
@@ -322,7 +382,7 @@ export default function WalletScreen() {
 
             <TouchableOpacity
               style={[styles.actionBtn, styles.sendSolBtn, txLoading && styles.actionBtnDisabled]}
-              onPress={() => router.push('/send' as any)}
+              onPress={() => router.push('/send' as never)}
               disabled={txLoading}
               activeOpacity={0.8}
             >
@@ -331,11 +391,16 @@ export default function WalletScreen() {
           </View>
         )}
 
-        {/* Last Transaction */}
         {lastTxSignature && (
           <View style={[styles.card, darkMode && styles.cardDark]}>
-            <Text style={[styles.cardLabel, darkMode && styles.subtextDark]}>LAST TRANSACTION</Text>
-            <Text style={[styles.txSig, darkMode && styles.textDark]} numberOfLines={1} ellipsizeMode="middle">
+            <Text style={[styles.cardLabel, darkMode && styles.subtextDark]}>
+              LAST TRANSACTION
+            </Text>
+            <Text
+              style={[styles.txSig, darkMode && styles.textDark]}
+              numberOfLines={1}
+              ellipsizeMode="middle"
+            >
               {lastTxSignature}
             </Text>
             <TouchableOpacity style={styles.viewTxBtn} onPress={handleViewTx}>
@@ -346,7 +411,7 @@ export default function WalletScreen() {
 
         <View style={styles.footer}>
           <Text style={[styles.footerText, darkMode && styles.subtextDark]}>
-            Forest Focus Timer – Solana Integration
+            {APP_IDENTITY.name} – Solana Integration
           </Text>
         </View>
       </ScrollView>
@@ -371,6 +436,7 @@ const styles = StyleSheet.create({
   cardDescription: { fontSize: 14, color: COLORS.textSecondary, lineHeight: 20, marginBottom: 16 },
   publicKey: { fontSize: 22, fontWeight: '700', color: COLORS.text, marginBottom: 4 },
   fullKey: { fontSize: 12, color: COLORS.textSecondary, marginBottom: 12 },
+  walletLabel: { fontSize: 12, color: COLORS.textSecondary, marginBottom: 12 },
   textDark: { color: COLORS.textDark },
   subtextDark: { color: COLORS.textSecondaryDark },
   connectBtn: { backgroundColor: COLORS.solana, borderRadius: 10, paddingVertical: 14, alignItems: 'center' },
