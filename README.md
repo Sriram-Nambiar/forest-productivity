@@ -22,6 +22,92 @@ as a **living forest that evolves over time**.
 
 ---
 
+Project Structure
+forest-productivity/
+├── .vscode/
+│ ├── extensions.json
+│ └── settings.json
+├── app/
+│ ├── (drawer)/
+│ │ ├── (tabs)/
+│ │ └── \_layout.tsx
+│ ├── \_layout.tsx
+│ ├── index.tsx
+│ └── send.tsx
+├── assets/
+│ └── images/
+│ ├── android-icon-background.png
+│ ├── android-icon-foreground.png
+│ ├── android-icon-monochrome.png
+│ ├── icon.png
+│ └── splash-icon.png
+├── scripts/
+│ └── reset-project.js
+├── src/
+│ ├── components/
+│ │ ├── forest/
+│ │ │ ├── AnalyticsTabs.tsx
+│ │ │ ├── DailyFocusRing.tsx
+│ │ │ ├── ForestCanvas.tsx
+│ │ │ ├── ForestStats.tsx
+│ │ │ ├── ForestTree.tsx
+│ │ │ ├── LevelCard.tsx
+│ │ │ ├── SessionCalendar.tsx
+│ │ │ └── TimeDistributionChart.tsx
+│ │ ├── timer/
+│ │ │ └── ProgressRing.tsx
+│ │ ├── DurationSelector.tsx
+│ │ ├── ErrorBoundary.tsx
+│ │ ├── SessionCard.tsx
+│ │ ├── TimerControls.tsx
+│ │ ├── TreeGrowthAnimation.tsx
+│ │ └── index.ts
+│ ├── constants/
+│ │ ├── index.ts
+│ │ └── timer.ts
+│ ├── hooks/
+│ │ ├── index.ts
+│ │ ├── useFocusTimer.ts
+│ │ └── useWallet.ts
+│ ├── screens/
+│ │ ├── ForestScreen.tsx
+│ │ ├── SettingsScreen.tsx
+│ │ ├── TimerScreen.tsx
+│ │ ├── WalletScreen.tsx
+│ │ └── index.ts
+│ ├── solana/
+│ │ ├── config.ts
+│ │ ├── connection.ts
+│ │ ├── index.ts
+│ │ ├── mobileWallet.ts
+│ │ ├── nft.ts
+│ │ └── transactions.ts
+│ ├── store/
+│ │ ├── index.ts
+│ │ ├── levelStore.ts
+│ │ ├── sessionStore.ts
+│ │ ├── settingsStore.ts
+│ │ ├── timerStore.ts
+│ │ └── walletStore.ts
+│ ├── utils/
+│ │ ├── analyticsHelpers.ts
+│ │ ├── helpers.ts
+│ │ ├── index.ts
+│ │ ├── storage.ts
+│ │ └── types.ts
+│ └── polyfills.ts
+├── .gitignore
+├── README.md
+├── app.json
+├── eas.json
+├── eslint.config.js
+├── index.js
+├── metro.config.js
+├── package-lock.json
+├── package.json
+└── tsconfig.json
+--
+
 # ✨ Features
 
 ## ⏳ Focus Timer
@@ -213,3 +299,4 @@ If you want, I can also give you a **version with screenshot placeholders and de
 
 # Start Expo
 npx expo start
+```
