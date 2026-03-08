@@ -21,7 +21,6 @@ import {
   getExplorerUrl,
   REWARD_AMOUNT_SOL,
   REWARD_COOLDOWN_MS,
-  type SolanaCluster,
 } from '../solana/config';
 import { getConnection } from '../solana/connection';
 import {
@@ -33,7 +32,6 @@ import {
   normalizeErrorMessage,
 } from '../solana/mobileWallet';
 import {
-  buildMemoTransaction,
   buildRewardTransaction,
   confirmTransaction,
 } from '../solana/transactions';
@@ -50,12 +48,12 @@ export default function WalletScreen() {
     lastTxSignature,
     lastRewardTimestamp,
     accountLabel,
-    setCluster,
     setConnecting,
     setLastTxSignature,
     setLastRewardTimestamp,
     setAuthorizationState,
     disconnect,
+    walletUriBase,
   } = useWalletStore();
 
   const [txLoading, setTxLoading] = useState(false);
@@ -66,9 +64,12 @@ export default function WalletScreen() {
 
     setConnecting(true);
     try {
-      const authorization = await transact(async (wallet: Web3MobileWallet) => {
-        return authorizeWalletSession(wallet, cluster, authToken);
-      });
+      const authorization = await transact(
+        async (wallet: Web3MobileWallet) => {
+          return authorizeWalletSession(wallet, cluster, authToken);
+        },
+        walletUriBase ? { baseUri: walletUriBase } : undefined,
+      );
 
       setAuthorizationState({
         publicKey: authorization.publicKey.toBase58(),
@@ -93,7 +94,14 @@ export default function WalletScreen() {
     } finally {
       setConnecting(false);
     }
-  }, [authToken, cluster, connecting, setAuthorizationState, setConnecting]);
+  }, [
+    authToken,
+    cluster,
+    connecting,
+    setAuthorizationState,
+    setConnecting,
+    walletUriBase,
+  ]);
 
   const handleDisconnect = useCallback(() => {
     Alert.alert('Disconnect Wallet', 'Are you sure you want to disconnect?', [
@@ -110,7 +118,6 @@ export default function WalletScreen() {
     async (payer: PublicKey, estimatedSpendLamports: number): Promise<void> => {
       const connection = getConnection(cluster);
       const currentLamports = await connection.getBalance(payer, 'confirmed');
-      // Include a small fee buffer for rent/fee fluctuations.
       const safetyBuffer = 10_000;
       if (currentLamports < estimatedSpendLamports + safetyBuffer) {
         throw new Error('Insufficient SOL balance for amount plus network fee.');
@@ -135,27 +142,38 @@ export default function WalletScreen() {
 
       const tx = await txBuilder(payerPubkey);
 
-      const signatureResult = await transact(async (wallet: Web3MobileWallet) => {
-        const authorization = await authorizeWalletSession(wallet, cluster, authToken);
+      const signatureResult = await transact(
+        async (wallet: Web3MobileWallet) => {
+          const authorization = await authorizeWalletSession(wallet, cluster, authToken);
 
-        setAuthorizationState({
-          publicKey: authorization.publicKey.toBase58(),
-          authToken: authorization.authToken,
-          walletUriBase: authorization.walletUriBase,
-          accountLabel: authorization.accountLabel,
-        });
+          setAuthorizationState({
+            publicKey: authorization.publicKey.toBase58(),
+            authToken: authorization.authToken,
+            walletUriBase: authorization.walletUriBase,
+            accountLabel: authorization.accountLabel,
+          });
 
-        const signatures = await wallet.signAndSendTransactions({
-          transactions: [tx],
-        });
-        return signatures[0];
-      });
+          const signatures = await wallet.signAndSendTransactions({
+            transactions: [tx],
+          });
+          return signatures[0];
+        },
+        walletUriBase ? { baseUri: walletUriBase } : undefined,
+      );
 
       const signature = extractSignature(signatureResult);
       setLastTxSignature(signature);
       return signature;
     },
-    [authToken, cluster, ensureSolBalance, publicKey, setAuthorizationState, setLastTxSignature],
+    [
+      authToken,
+      cluster,
+      ensureSolBalance,
+      publicKey,
+      setAuthorizationState,
+      setLastTxSignature,
+      walletUriBase,
+    ],
   );
 
   const handleSendReward = useCallback(async () => {
@@ -218,36 +236,6 @@ export default function WalletScreen() {
     setLastRewardTimestamp,
   ]);
 
-  const handleSendMemo = useCallback(async () => {
-    if (!publicKey || txInProgressRef.current) return;
-
-    txInProgressRef.current = true;
-    setTxLoading(true);
-    try {
-      const sig = await executeWalletTransaction((payer) =>
-        buildMemoTransaction(payer, cluster, 25),
-      );
-
-      const confirmed = await confirmTransaction(sig, cluster);
-      Alert.alert(
-        confirmed ? 'Memo Recorded! 📝' : 'Memo Submitted',
-        `Focus proof ${confirmed ? 'written on-chain' : 'submitted (pending confirmation)'}.\nSignature: ${sig.slice(0, 16)}...`,
-      );
-    } catch (error: unknown) {
-      const message = normalizeErrorMessage(error);
-      console.error('[Send Memo] Error:', message);
-
-      if (isLikelyUserRejection(message)) {
-        Alert.alert('Transaction Cancelled', 'You cancelled the memo transaction.');
-      } else {
-        Alert.alert('Memo Error', message);
-      }
-    } finally {
-      txInProgressRef.current = false;
-      setTxLoading(false);
-    }
-  }, [cluster, executeWalletTransaction, publicKey]);
-
   const handleViewTx = useCallback(() => {
     if (!lastTxSignature) return;
     const url = getExplorerUrl(lastTxSignature, cluster);
@@ -255,21 +243,6 @@ export default function WalletScreen() {
       Alert.alert('Error', 'Could not open browser.');
     });
   }, [lastTxSignature, cluster]);
-
-  const handleToggleCluster = useCallback(() => {
-    const next: SolanaCluster = cluster === 'devnet' ? 'mainnet-beta' : 'devnet';
-    Alert.alert(
-      'Switch Network',
-      `Switch to ${next === 'devnet' ? 'Devnet' : 'Mainnet'}? This will disconnect your current wallet session.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Switch',
-          onPress: () => setCluster(next),
-        },
-      ],
-    );
-  }, [cluster, setCluster]);
 
   const shortKey = publicKey
     ? `${publicKey.slice(0, 6)}...${publicKey.slice(-4)}`
@@ -280,24 +253,10 @@ export default function WalletScreen() {
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <Text style={[styles.title, darkMode && styles.titleDark]}>Wallet</Text>
 
-        <TouchableOpacity
-          style={[
-            styles.networkBadge,
-            cluster === 'mainnet-beta' && styles.networkBadgeMainnet,
-          ]}
-          onPress={handleToggleCluster}
-          activeOpacity={0.7}
-        >
-          <View
-            style={[
-              styles.networkDot,
-              cluster === 'mainnet-beta' && styles.networkDotMainnet,
-            ]}
-          />
-          <Text style={styles.networkText}>
-            {cluster === 'devnet' ? 'Devnet' : 'Mainnet'}
-          </Text>
-        </TouchableOpacity>
+        <View style={styles.networkBadge}>
+          <View style={styles.networkDot} />
+          <Text style={styles.networkText}>Devnet</Text>
+        </View>
 
         <View style={[styles.card, darkMode && styles.cardDark]}>
           {publicKey ? (
@@ -328,7 +287,7 @@ export default function WalletScreen() {
                 NOT CONNECTED
               </Text>
               <Text style={[styles.cardDescription, darkMode && styles.subtextDark]}>
-                Connect a Solana wallet to send rewards and record focus proofs on-chain.
+                Connect a Solana wallet to send rewards and test transfers on devnet.
               </Text>
               <TouchableOpacity
                 style={[styles.connectBtn, connecting && styles.connectBtnDisabled]}
@@ -368,19 +327,6 @@ export default function WalletScreen() {
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[styles.actionBtn, styles.memoBtn, txLoading && styles.actionBtnDisabled]}
-              onPress={handleSendMemo}
-              disabled={txLoading}
-              activeOpacity={0.8}
-            >
-              {txLoading ? (
-                <ActivityIndicator color="#FFFFFF" size="small" />
-              ) : (
-                <Text style={styles.actionBtnText}>Record Focus Memo 📝</Text>
-              )}
-            </TouchableOpacity>
-
-            <TouchableOpacity
               style={[styles.actionBtn, styles.sendSolBtn, txLoading && styles.actionBtnDisabled]}
               onPress={() => router.push('/send' as never)}
               disabled={txLoading}
@@ -411,7 +357,7 @@ export default function WalletScreen() {
 
         <View style={styles.footer}>
           <Text style={[styles.footerText, darkMode && styles.subtextDark]}>
-            {APP_IDENTITY.name} – Solana Integration
+            {APP_IDENTITY.name} – Solana Devnet
           </Text>
         </View>
       </ScrollView>
@@ -426,9 +372,7 @@ const styles = StyleSheet.create({
   title: { fontSize: 28, fontWeight: '700', color: COLORS.primaryDark, paddingVertical: 16 },
   titleDark: { color: COLORS.primaryLight },
   networkBadge: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', backgroundColor: '#E8F5E9', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, marginBottom: 16 },
-  networkBadgeMainnet: { backgroundColor: '#F3E5F5' },
   networkDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.success, marginRight: 8 },
-  networkDotMainnet: { backgroundColor: COLORS.solana },
   networkText: { fontSize: 13, fontWeight: '600', color: COLORS.text },
   card: { backgroundColor: COLORS.surface, borderRadius: 12, padding: 16, marginBottom: 12, elevation: 1, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 2 },
   cardDark: { backgroundColor: COLORS.surfaceDark },
@@ -445,7 +389,6 @@ const styles = StyleSheet.create({
   disconnectBtn: { borderWidth: 1, borderColor: COLORS.error, borderRadius: 10, paddingVertical: 10, alignItems: 'center' },
   disconnectText: { color: COLORS.error, fontSize: 14, fontWeight: '600' },
   actionBtn: { backgroundColor: COLORS.primary, borderRadius: 10, paddingVertical: 14, alignItems: 'center', marginBottom: 8 },
-  memoBtn: { backgroundColor: COLORS.solana },
   sendSolBtn: { backgroundColor: '#FF6F00' },
   actionBtnDisabled: { opacity: 0.6 },
   actionBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },

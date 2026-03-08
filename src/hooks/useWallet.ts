@@ -18,6 +18,7 @@ export function useWallet() {
     publicKey,
     cluster,
     authToken,
+    walletUriBase,
     setAuthorizationState,
     disconnect,
     setLastTxSignature,
@@ -30,9 +31,12 @@ export function useWallet() {
   const connect = useCallback(async () => {
     setConnecting(true);
     try {
-      const authorization = await transact(async (wallet: Web3MobileWallet) => {
-        return authorizeWalletSession(wallet, cluster, authToken);
-      });
+      const authorization = await transact(
+        async (wallet: Web3MobileWallet) => {
+          return authorizeWalletSession(wallet, cluster, authToken);
+        },
+        walletUriBase ? { baseUri: walletUriBase } : undefined,
+      );
 
       setAuthorizationState({
         publicKey: authorization.publicKey.toBase58(),
@@ -45,7 +49,7 @@ export function useWallet() {
     } finally {
       setConnecting(false);
     }
-  }, [authToken, cluster, setAuthorizationState]);
+  }, [authToken, cluster, setAuthorizationState, walletUriBase]);
 
   const getBalance = useCallback(async () => {
     if (!publicKey) return 0;
@@ -93,6 +97,7 @@ export function useWallet() {
 
             return signatures[0];
           },
+          walletUriBase ? { baseUri: walletUriBase } : undefined,
         );
 
         const signature = extractSignature(signatureResult);
@@ -104,7 +109,14 @@ export function useWallet() {
         setSending(false);
       }
     },
-    [authToken, cluster, publicKey, setAuthorizationState, setLastTxSignature],
+    [
+      authToken,
+      cluster,
+      publicKey,
+      setAuthorizationState,
+      setLastTxSignature,
+      walletUriBase,
+    ],
   );
 
   return {

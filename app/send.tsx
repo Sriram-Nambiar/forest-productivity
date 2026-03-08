@@ -36,7 +36,6 @@ import {
 import { useSettingsStore } from '../src/store/settingsStore';
 import { useWalletStore } from '../src/store/walletStore';
 
-/** Validate a Solana base58 address */
 function isValidSolanaAddress(address: string): boolean {
   try {
     new PublicKey(address);
@@ -52,6 +51,7 @@ export default function SendScreen() {
     publicKey,
     cluster,
     authToken,
+    walletUriBase,
     setAuthorizationState,
     setLastTxSignature,
   } = useWalletStore();
@@ -139,22 +139,25 @@ export default function SendScreen() {
         cluster,
       );
 
-      const signatureResult = await transact(async (wallet: Web3MobileWallet) => {
-        const authorization = await authorizeWalletSession(wallet, cluster, authToken);
+      const signatureResult = await transact(
+        async (wallet: Web3MobileWallet) => {
+          const authorization = await authorizeWalletSession(wallet, cluster, authToken);
 
-        setAuthorizationState({
-          publicKey: authorization.publicKey.toBase58(),
-          authToken: authorization.authToken,
-          walletUriBase: authorization.walletUriBase,
-          accountLabel: authorization.accountLabel,
-        });
+          setAuthorizationState({
+            publicKey: authorization.publicKey.toBase58(),
+            authToken: authorization.authToken,
+            walletUriBase: authorization.walletUriBase,
+            accountLabel: authorization.accountLabel,
+          });
 
-        const signatures = await wallet.signAndSendTransactions({
-          transactions: [tx],
-        });
+          const signatures = await wallet.signAndSendTransactions({
+            transactions: [tx],
+          });
 
-        return signatures[0];
-      });
+          return signatures[0];
+        },
+        walletUriBase ? { baseUri: walletUriBase } : undefined,
+      );
 
       const sig = extractSignature(signatureResult);
 
@@ -222,6 +225,7 @@ export default function SendScreen() {
     setAuthorizationState,
     setLastTxSignature,
     validate,
+    walletUriBase,
   ]);
 
   const shortKey = publicKey
@@ -252,21 +256,9 @@ export default function SendScreen() {
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
         >
-          <View
-            style={[
-              styles.networkBadge,
-              cluster === 'mainnet-beta' && styles.networkBadgeMainnet,
-            ]}
-          >
-            <View
-              style={[
-                styles.networkDot,
-                cluster === 'mainnet-beta' && styles.networkDotMainnet,
-              ]}
-            />
-            <Text style={styles.networkText}>
-              {cluster === 'devnet' ? 'Devnet' : 'Mainnet'}
-            </Text>
+          <View style={styles.networkBadge}>
+            <View style={styles.networkDot} />
+            <Text style={styles.networkText}>Devnet</Text>
           </View>
 
           {publicKey ? (
@@ -344,14 +336,6 @@ export default function SendScreen() {
               <Text style={styles.sendBtnText}>Send {amountText.trim() || '0'} SOL</Text>
             )}
           </TouchableOpacity>
-
-          {cluster === 'mainnet-beta' && (
-            <View style={styles.warningCard}>
-              <Text style={styles.warningText}>
-                ⚠️ You are on Mainnet. This transaction will use real SOL.
-              </Text>
-            </View>
-          )}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -407,18 +391,12 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     marginBottom: 16,
   },
-  networkBadgeMainnet: {
-    backgroundColor: '#F3E5F5',
-  },
   networkDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
     backgroundColor: COLORS.success,
     marginRight: 8,
-  },
-  networkDotMainnet: {
-    backgroundColor: COLORS.solana,
   },
   networkText: {
     fontSize: 13,
@@ -502,17 +480,5 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 17,
     fontWeight: '700',
-  },
-  warningCard: {
-    backgroundColor: '#FFF3E0',
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 12,
-  },
-  warningText: {
-    fontSize: 13,
-    color: '#E65100',
-    fontWeight: '600',
-    textAlign: 'center',
   },
 });

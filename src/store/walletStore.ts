@@ -12,7 +12,7 @@ interface WalletState {
   walletUriBase: string | null;
   /** Wallet account label */
   accountLabel: string | null;
-  /** Currently selected Solana cluster */
+  /** Solana cluster (devnet-only in this app build) */
   cluster: SolanaCluster;
   /** Whether a wallet operation is in progress */
   connecting: boolean;
@@ -101,7 +101,7 @@ export const useWalletStore = create<WalletState>((set) => ({
 
   loadWalletSettings: async () => {
     const saved = await safeGetItem<string>(STORAGE_KEYS.WALLET_CLUSTER);
-    if (saved === "devnet" || saved === "mainnet-beta") {
+    if (saved === "devnet") {
       set({ cluster: saved });
     }
   },

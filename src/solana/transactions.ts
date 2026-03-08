@@ -3,7 +3,6 @@ import {
   PublicKey,
   SystemProgram,
   Transaction,
-  TransactionInstruction,
 } from "@solana/web3.js";
 import {
   REWARD_AMOUNT_SOL,
@@ -11,11 +10,6 @@ import {
   type SolanaCluster,
 } from "./config";
 import { getConnection } from "./connection";
-
-/** Solana Memo Program ID */
-const MEMO_PROGRAM_ID = new PublicKey(
-  "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr",
-);
 
 export interface TransactionResult {
   signature: string;
@@ -26,6 +20,7 @@ function solToLamports(amountSol: number): number {
   if (!Number.isFinite(amountSol) || amountSol <= 0) {
     throw new Error("Transfer amount must be greater than zero.");
   }
+
   return Math.round(amountSol * LAMPORTS_PER_SOL);
 }
 
@@ -53,43 +48,6 @@ export async function buildRewardTransaction(
       fromPubkey: payerPublicKey,
       toPubkey: treasury,
       lamports: solToLamports(REWARD_AMOUNT_SOL),
-    }),
-  );
-
-  return transaction;
-}
-
-/**
- * Build a memo transaction to record focus session proof on-chain.
- */
-export async function buildMemoTransaction(
-  payerPublicKey: PublicKey,
-  cluster: SolanaCluster,
-  durationMinutes: number,
-): Promise<Transaction> {
-  if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) {
-    throw new Error("Memo duration must be greater than zero minutes.");
-  }
-
-  const connection = getConnection(cluster);
-
-  const { blockhash, lastValidBlockHeight } =
-    await connection.getLatestBlockhash("confirmed");
-
-  const memo = `Focus session completed: ${durationMinutes} minutes`;
-  const memoBuffer = Buffer.from(memo, "utf-8");
-
-  const transaction = new Transaction({
-    blockhash,
-    lastValidBlockHeight,
-    feePayer: payerPublicKey,
-  });
-
-  transaction.add(
-    new TransactionInstruction({
-      keys: [{ pubkey: payerPublicKey, isSigner: true, isWritable: true }],
-      programId: MEMO_PROGRAM_ID,
-      data: memoBuffer,
     }),
   );
 
