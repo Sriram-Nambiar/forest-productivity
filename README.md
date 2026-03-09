@@ -287,18 +287,7 @@ MIT License
 
 ---
 
-✅ **How to use**
-
-1. Open your repo
-2. Open `README.md`
-3. Replace contents
-4. Paste the code above
-5. Commit
 
 ---
 
-If you want, I can also give you a **version with screenshot placeholders and demo GIF sections**, which makes the README look **10× more impressive on GitHub.**
-
-# Start Expo
-npx expo start
-```
+If you want, I can also give you a **version with screenshot placeholders and demo GIF sections**, 
