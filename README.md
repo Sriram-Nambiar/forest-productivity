@@ -1,14 +1,16 @@
-<div align="center">
+
+
 
 # 🌲 Forest Focus
-
+Notion https://tidy-cloth-69e.notion.site/Forest-Focus-318ccd682c81808283dbe1ef50d92cc4
 **A gamified productivity app built with React Native (Expo) for the Seeker Mobile Phone at the Monolith Hackathon.**
 
 *Stay focused. Grow your forest. Get distracted. Watch it die.*
 
 <img src="images/screenshot.png" alt="Forest Focus App Screenshot" width="300" />
 
-</div>
+
+
 
 ---
 
