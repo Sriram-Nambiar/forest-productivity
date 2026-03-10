@@ -1,13 +1,18 @@
-import type { TreeStage } from '../constants';
+import type { TreeStage } from "../constants";
 
-export type TimerStatus = 'idle' | 'running' | 'paused' | 'completed' | 'failed';
+export type TimerStatus =
+  | "idle"
+  | "running"
+  | "paused"
+  | "completed"
+  | "failed";
 
 export interface FocusSession {
   id: string;
   durationMinutes: number;
   startTime: number;
   endTime: number | null;
-  status: 'completed' | 'failed';
+  status: "completed" | "failed";
   treeStage: TreeStage;
 }
 

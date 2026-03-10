@@ -40,6 +40,12 @@ export const TREASURY_WALLET = "GKvEF5U4RYz4KDCzHMdVkPSTLMmt1d3bYNfuTxkvh3ni";
 /** SOL amount transferred per completed focus session (in SOL). */
 export const REWARD_AMOUNT_SOL = 0.001;
 
+/**
+ * SOL amount required to revive a dead tree (in SOL).
+ * Sent to the treasury wallet on successful revival.
+ */
+export const REVIVE_COST_SOL = 0.001;
+
 /** Rate-limit: minimum ms between reward transactions. */
 export const REWARD_COOLDOWN_MS = 60_000;
 

@@ -3,10 +3,13 @@ import { STORAGE_KEYS } from "../constants";
 import { safeGetItem, safeRemoveItem, safeSetItem } from "../utils/storage";
 import type { ActiveSession, TimerStatus } from "../utils/types";
 
+export type TreeStatus = "alive" | "dead";
+
 interface TimerState {
   durationMinutes: number;
   remainingSeconds: number;
   status: TimerStatus;
+  tree: { status: TreeStatus };
   startTime: number | null;
   pausedAt: number | null;
 
@@ -17,6 +20,7 @@ interface TimerState {
   tick: () => void;
   completeTimer: () => void;
   failTimer: () => void;
+  reviveTree: () => void;
   resetTimer: () => void;
   restoreSession: () => Promise<boolean>;
   persistSession: () => Promise<void>;
@@ -27,17 +31,17 @@ export const useTimerStore = create<TimerState>((set, get) => ({
   durationMinutes: 25,
   remainingSeconds: 25 * 60,
   status: "idle",
+  tree: { status: "alive" },
   startTime: null,
   pausedAt: null,
 
   setDuration: (minutes: number) => {
     const state = get();
-    // ✅ FIX: Allow changing duration when idle, completed, or failed
+    // Allow changing duration only when not actively running or paused
     if (state.status === "running" || state.status === "paused") return;
     set({
       durationMinutes: minutes,
       remainingSeconds: minutes * 60,
-      // Reset to idle so startTimer works
       status: "idle",
       startTime: null,
       pausedAt: null,
@@ -50,6 +54,8 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     const now = Date.now();
     set({
       status: "running",
+      // Always start with a living tree
+      tree: { status: "alive" },
       startTime: now,
       remainingSeconds: state.durationMinutes * 60,
       pausedAt: null,
@@ -82,14 +88,32 @@ export const useTimerStore = create<TimerState>((set, get) => ({
   },
 
   completeTimer: () => {
+    // Session completed successfully — tree survives
     set({
       status: "completed",
+      tree: { status: "alive" },
       remainingSeconds: 0,
     });
   },
 
   failTimer: () => {
-    set({ status: "failed" });
+    // Session was cancelled — tree dies
+    set({
+      status: "failed",
+      tree: { status: "dead" },
+    });
+  },
+
+  reviveTree: () => {
+    // Called after a successful SOL payment — restore tree and reset to idle
+    const state = get();
+    set({
+      tree: { status: "alive" },
+      status: "idle",
+      remainingSeconds: state.durationMinutes * 60,
+      startTime: null,
+      pausedAt: null,
+    });
   },
 
   resetTimer: () => {
@@ -120,6 +144,8 @@ export const useTimerStore = create<TimerState>((set, get) => ({
         durationMinutes: saved.durationMinutes,
         remainingSeconds: remaining,
         startTime: saved.startTime,
+        // Restored sessions always have a living tree
+        tree: { status: "alive" },
         status: "paused",
         pausedAt: Date.now(),
       });

@@ -5,6 +5,7 @@ import {
   Transaction,
 } from "@solana/web3.js";
 import {
+  REVIVE_COST_SOL,
   REWARD_AMOUNT_SOL,
   TREASURY_WALLET,
   type SolanaCluster,
@@ -50,6 +51,39 @@ export async function buildRewardTransaction(
       fromPubkey: payerPublicKey,
       toPubkey: treasury,
       lamports: solToLamports(REWARD_AMOUNT_SOL),
+    }),
+  );
+
+  return transaction;
+}
+
+/**
+ * Build a SOL transfer transaction to the treasury wallet (revive tree tx).
+ *
+ * The user pays REVIVE_COST_SOL to bring their dead tree back to life.
+ * The payment is sent to the same treasury wallet used for reward transactions.
+ */
+export async function buildReviveTreeTransaction(
+  payerPublicKey: PublicKey,
+  cluster: SolanaCluster,
+): Promise<Transaction> {
+  const connection = getConnection(cluster);
+  const treasury = new PublicKey(TREASURY_WALLET);
+
+  const { blockhash, lastValidBlockHeight } =
+    await connection.getLatestBlockhash("confirmed");
+
+  const transaction = new Transaction({
+    blockhash,
+    lastValidBlockHeight,
+    feePayer: payerPublicKey,
+  });
+
+  transaction.add(
+    SystemProgram.transfer({
+      fromPubkey: payerPublicKey,
+      toPubkey: treasury,
+      lamports: solToLamports(REVIVE_COST_SOL),
     }),
   );
 

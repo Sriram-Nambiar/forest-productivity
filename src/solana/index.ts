@@ -4,10 +4,11 @@ export {
   DEVNET_RPC_URL,
   EXPLORER_BASE,
   getExplorerUrl,
+  REVIVE_COST_SOL,
   REWARD_AMOUNT_SOL,
   REWARD_COOLDOWN_MS,
   RPC_ENDPOINTS,
-  TREASURY_WALLET
+  TREASURY_WALLET,
 } from "./config";
 export type { SolanaCluster } from "./config";
 
@@ -17,8 +18,9 @@ export { getConnection, resetConnection } from "./connection";
 // ─── Transactions ───
 export {
   buildRewardTransaction,
+  buildReviveTreeTransaction,
   buildSendSOLTransaction,
-  confirmTransaction
+  confirmTransaction,
 } from "./transactions";
 export type { TransactionResult } from "./transactions";
 
@@ -36,7 +38,6 @@ export {
   isLikelyRpcFailure,
   isLikelyUserRejection,
   isLikelyWalletMissing,
-  normalizeErrorMessage
+  normalizeErrorMessage,
 } from "./mobileWallet";
 export type { WalletAuthorizationState } from "./mobileWallet";
-
