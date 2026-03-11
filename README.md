@@ -8,6 +8,14 @@
 
 <img src="images/screenshot.png" alt="Forest Focus App Screenshot" width="300" />
 
+## 📹 Demo Video
+
+https://github.com/user-attachments/assets/placeholder
+
+<video src="demo.webm" width="300" controls>
+  Your browser does not support the video tag.
+</video>
+
 </div>
 
 ---
@@ -129,32 +137,33 @@ forest-productivity/
 ├── package.json
 └── tsconfig.json
 
+## ⚙️ Installation & Setup
 
-
-⚙️ Installation & Setup
 Clone the repo
 
-Bash
-git clone [https://github.com/your-username/forest-focus.git](https://github.com/your-username/forest-focus.git)
+```bash
+git clone https://github.com/your-username/forest-focus.git
 cd forest-focus
+```
+
 Install dependencies
 
-Bash
+```bash
 npm install
+```
+
 Start the Expo server
 
-Bash
+```bash
 npx expo start
-🔮 Future Improvements
-On-chain rewards for completed sessions.
+```
+## 🔮 Future Improvements
 
-NFT-based forest trees.
-
-Streak multipliers.
-
-Community focus rooms.
-
-Tokenized accountability system.
+- On-chain rewards for completed sessions.
+- NFT-based forest trees.
+- Streak multipliers.
+- Community focus rooms.
+- Tokenized accountability system.
 
 📜 License
 This project is licensed under the MIT License.

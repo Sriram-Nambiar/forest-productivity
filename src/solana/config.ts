@@ -35,7 +35,7 @@ export const RPC_ENDPOINTS: Record<SolanaCluster, string> = {
 };
 
 /** Configurable treasury wallet address for reward deposits. */
-export const TREASURY_WALLET = "GKvEF5U4RYz4KDCzHMdVkPSTLMmt1d3bYNfuTxkvh3ni";
+export const TREASURY_WALLET = "2C3NGzgqhok9dERmXKofHausXwnNT3y4SvRUSg3zXabx";
 
 /** SOL amount transferred per completed focus session (in SOL). */
 export const REWARD_AMOUNT_SOL = 0.001;

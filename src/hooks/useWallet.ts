@@ -67,17 +67,11 @@ export function useWallet() {
 
       setSending(true);
       try {
-        const payer = new PublicKey(publicKey);
         const recipient = new PublicKey(toAddress);
-        const transaction = await buildSendSOLTransaction(
-          payer,
-          recipient,
-          amountSOL,
-          cluster,
-        );
 
         const signatureResult = await transact(
           async (wallet: Web3MobileWallet) => {
+            // ─── Authorize (or re-authorize) the wallet session ───────────
             const authorization = await authorizeWalletSession(
               wallet,
               cluster,
@@ -90,6 +84,21 @@ export function useWallet() {
               walletUriBase: authorization.walletUriBase,
               accountLabel: authorization.accountLabel,
             });
+
+            // ─── Build transaction INSIDE transact() ─────────────────────
+            //
+            // Building the transaction here — after authorization — guarantees
+            // that the blockhash we embed is as fresh as possible.  If we
+            // built it before calling transact() the wallet-open round-trip
+            // (~2–10 s) plus any user deliberation time could push us close to
+            // the ~60 s blockhash validity window, risking a "blockhash not
+            // found" rejection from the cluster.
+            const transaction = await buildSendSOLTransaction(
+              authorization.publicKey, // use the authorised key, not the stored one
+              recipient,
+              amountSOL,
+              cluster,
+            );
 
             const signatures = await wallet.signAndSendTransactions({
               transactions: [transaction],
