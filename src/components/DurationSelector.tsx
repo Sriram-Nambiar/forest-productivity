@@ -134,7 +134,7 @@ const DurationSelector = memo(function DurationSelector({
             <TextInput
               style={[styles.modalInput, darkMode && styles.modalInputDark]}
               value={customValue}
-              onChangeText={setCustomValue}
+              onChangeText={(text) => setCustomValue(text.replace(/[^0-9]/g, ''))}
               keyboardType="number-pad"
               autoFocus
               selectTextOnFocus
