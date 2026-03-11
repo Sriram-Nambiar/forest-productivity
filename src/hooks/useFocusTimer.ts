@@ -22,6 +22,7 @@ export function useFocusTimer() {
     remainingSeconds,
     status,
     tick,
+    syncRemainingSeconds,
     completeTimer,
     failTimer,
     resetTimer,
@@ -173,11 +174,11 @@ export function useFocusTimer() {
   useEffect(() => {
     if (status === "running") {
       intervalRef.current = setInterval(() => {
+        // Use wall-clock sync to prevent drift over long sessions
+        syncRemainingSeconds();
         const state = useTimerStore.getState();
-        if (state.remainingSeconds <= 1) {
+        if (state.remainingSeconds <= 0) {
           handleComplete();
-        } else {
-          tick();
         }
       }, TIMER_INTERVAL_MS);
     } else {
@@ -185,7 +186,7 @@ export function useFocusTimer() {
     }
 
     return clearInterval_;
-  }, [status, tick, handleComplete, clearInterval_]);
+  }, [status, syncRemainingSeconds, handleComplete, clearInterval_]);
 
   // Persist session periodically
   useEffect(() => {

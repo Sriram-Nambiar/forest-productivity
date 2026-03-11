@@ -18,6 +18,7 @@ interface TimerState {
   pauseTimer: () => void;
   resumeTimer: () => void;
   tick: () => void;
+  syncRemainingSeconds: () => void;
   completeTimer: () => void;
   failTimer: () => void;
   reviveTree: () => void;
@@ -85,6 +86,15 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     if (state.status !== "running") return;
     const newRemaining = Math.max(0, state.remainingSeconds - 1);
     set({ remainingSeconds: newRemaining });
+  },
+
+  syncRemainingSeconds: () => {
+    const state = get();
+    if (state.status !== "running" || !state.startTime) return;
+    const elapsed = Math.floor((Date.now() - state.startTime) / 1000);
+    const totalSeconds = state.durationMinutes * 60;
+    const remaining = Math.max(0, totalSeconds - elapsed);
+    set({ remainingSeconds: remaining });
   },
 
   completeTimer: () => {
