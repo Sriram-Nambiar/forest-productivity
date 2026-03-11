@@ -2,26 +2,23 @@ import {
   transact,
   type Web3MobileWallet,
 } from "@solana-mobile/mobile-wallet-adapter-protocol-web3js";
-import { LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
+import {
+  Connection,
+  LAMPORTS_PER_SOL,
+  PublicKey,
+  SystemProgram,
+  Transaction,
+  clusterApiUrl,
+} from "@solana/web3.js";
 import { useCallback, useState } from "react";
 import { Alert } from "react-native";
-import { REVIVE_COST_SOL } from "../solana/config";
-import { getConnection } from "../solana/connection";
-import {
-  authorizeWalletSession,
-  extractSignature,
-  isLikelyInsufficientFunds,
-  isLikelyRpcFailure,
-  isLikelyUserRejection,
-  isLikelyWalletMissing,
-  normalizeErrorMessage,
-} from "../solana/mobileWallet";
-import {
-  buildReviveTreeTransaction,
-  confirmTransaction,
-} from "../solana/transactions";
+import { REVIVE_COST_SOL, TREASURY_WALLET } from "../solana/config";
+import { APP_IDENTITY } from "../solana/mobileWallet";
 import { useTimerStore } from "../store/timerStore";
 import { useWalletStore } from "../store/walletStore";
+
+/** Revive cost in lamports */
+const REVIVE_COST_LAMPORTS = Math.round(REVIVE_COST_SOL * LAMPORTS_PER_SOL);
 
 export interface UseReviveTreeResult {
   handleRevive: () => Promise<void>;
@@ -38,8 +35,6 @@ export function useReviveTree(): UseReviveTreeResult {
 
   const {
     publicKey,
-    authToken,
-    cluster,
     walletUriBase,
     setAuthorizationState,
     setLastTxSignature,
@@ -50,6 +45,9 @@ export function useReviveTree(): UseReviveTreeResult {
   }, []);
 
   const handleRevive = useCallback(async () => {
+    console.log("[Revive] pressed");
+    console.log("[Revive] publicKey from store:", publicKey);
+
     // ── Guard: wallet must be connected ──
     if (!publicKey) {
       setReviveError(
@@ -62,73 +60,95 @@ export function useReviveTree(): UseReviveTreeResult {
     setReviveError(null);
 
     try {
-      const payerPk = new PublicKey(publicKey);
+      console.log("[Revive] calling transact()...");
 
-      // ── Pre-flight balance check ──
-      // Require cost + ~5000 lamports buffer for transaction fees
-      const connection = getConnection(cluster);
-      const balanceLamports = await connection.getBalance(payerPk, "confirmed");
-      const costLamports = Math.round(REVIVE_COST_SOL * LAMPORTS_PER_SOL);
-      const requiredLamports = costLamports + 5_000;
-
-      if (balanceLamports < requiredLamports) {
-        throw new Error(
-          `Insufficient SOL. You need at least ${(
-            requiredLamports / LAMPORTS_PER_SOL
-          ).toFixed(6)} SOL (${REVIVE_COST_SOL} SOL + fees), ` +
-            `but your wallet only has ${(
-              balanceLamports / LAMPORTS_PER_SOL
-            ).toFixed(6)} SOL.`,
-        );
-      }
-
-      // ── Build, sign & send transaction via Mobile Wallet Adapter ──
-      const signatureStr = await transact(
+      await transact(
         async (wallet: Web3MobileWallet) => {
-          // Authorize (or re-authorize) the wallet session
-          const auth = await authorizeWalletSession(wallet, cluster, authToken);
+          console.log(
+            "[Revive] transact() opened — wallet callback running",
+          );
 
-          // Keep the stored auth state fresh so subsequent requests re-use it
+          // 1. Authorize — let the wallet handle it entirely
+          const authResult = await wallet.authorize({
+            chain: "solana:devnet",
+            identity: APP_IDENTITY,
+          });
+          console.log(
+            "[Revive] authorized, accounts:",
+            authResult.accounts.length,
+          );
+
+          const account = authResult.accounts[0];
+          if (!account) {
+            throw new Error("Wallet returned no accounts on authorize.");
+          }
+          console.log("[Revive] account address:", account.address);
+
+          // Persist auth state so subsequent requests re-use it
+          const userPublicKey = new PublicKey(
+            Buffer.from(account.address, "base64"),
+          );
           setAuthorizationState({
-            publicKey: auth.publicKey.toBase58(),
-            authToken: auth.authToken,
-            walletUriBase: auth.walletUriBase,
-            accountLabel: auth.accountLabel,
+            publicKey: userPublicKey.toBase58(),
+            authToken: authResult.auth_token,
+            walletUriBase: authResult.wallet_uri_base ?? "",
+            accountLabel: account.label ?? null,
           });
 
-          // Build the revive transaction (SOL transfer to treasury)
-          const tx = await buildReviveTreeTransaction(auth.publicKey, cluster);
+          // 2. Build the transaction
+          const connection = new Connection(
+            clusterApiUrl("devnet"),
+            "confirmed",
+          );
+          const { blockhash } = await connection.getLatestBlockhash();
+          console.log("[Revive] got blockhash:", blockhash);
 
-          const signatures = await wallet.signAndSendTransactions({
-            transactions: [tx],
+          const transaction = new Transaction({
+            recentBlockhash: blockhash,
+            feePayer: userPublicKey,
+          }).add(
+            SystemProgram.transfer({
+              fromPubkey: userPublicKey,
+              toPubkey: new PublicKey(TREASURY_WALLET),
+              lamports: REVIVE_COST_LAMPORTS,
+            }),
+          );
+
+          // 3. Wallet signs + broadcasts — we never call sendRawTransaction
+          console.log(
+            "[Revive] calling wallet.signAndSendTransactions...",
+          );
+          const result = await wallet.signAndSendTransactions({
+            transactions: [transaction],
           });
+          console.log("[Revive] wallet returned signatures:", result);
 
-          const sig = signatures[0];
+          const sig = result[0];
           if (!sig) {
             throw new Error(
               "Wallet returned no signature. The transaction may not have been sent.",
             );
           }
 
-          return extractSignature(sig);
+          // Convert Uint8Array signature to base58 string if needed
+          let signatureStr: string;
+          if (typeof sig === "string") {
+            signatureStr = sig;
+          } else {
+            // Import bs58 dynamically to encode raw bytes
+            const bs58 = require("bs58");
+            signatureStr = bs58.encode(sig);
+          }
+          console.log("[Revive] transaction signature:", signatureStr);
+
+          // 4. Store the signature
+          setLastTxSignature(signatureStr);
+
+          // 5. Revive the tree in app state
+          reviveTree();
         },
         walletUriBase ? { baseUri: walletUriBase } : undefined,
       );
-
-      // Store the signature so the Wallet screen can display it
-      setLastTxSignature(signatureStr);
-
-      // ── Wait for on-chain confirmation ──
-      const confirmed = await confirmTransaction(signatureStr, cluster);
-      if (!confirmed) {
-        throw new Error(
-          "Transaction was sent but could not be confirmed on-chain. " +
-            "Please check your wallet for the transaction status and try again if needed.",
-        );
-      }
-
-      // ── All good — revive the tree! ──
-      reviveTree();
 
       Alert.alert(
         "Tree Revived! 🌱",
@@ -136,36 +156,45 @@ export function useReviveTree(): UseReviveTreeResult {
         [{ text: "Let's Grow! 🌳", style: "default" }],
       );
     } catch (err: unknown) {
-      const message = normalizeErrorMessage(err);
-      console.error("[useReviveTree] handleRevive error:", message);
+      const message =
+        err instanceof Error
+          ? err.message
+          : typeof err === "string"
+            ? err
+            : "An unknown error occurred.";
+      console.error("[Revive] error:", message, err);
 
-      if (isLikelyUserRejection(message)) {
-        // User cancelled in the wallet app — not an error, just inform them
+      if (
+        message.toLowerCase().includes("cancel") ||
+        message.toLowerCase().includes("rejected") ||
+        message.toLowerCase().includes("declined")
+      ) {
         setReviveError(
           "Transaction cancelled. Your tree is still waiting to be revived.",
         );
-      } else if (isLikelyWalletMissing(message)) {
+      } else if (
+        message.toLowerCase().includes("not found") ||
+        message.toLowerCase().includes("not installed")
+      ) {
         setReviveError(
           "No compatible wallet found. Please install Phantom, Solflare, or Backpack and try again.",
         );
-      } else if (isLikelyInsufficientFunds(message)) {
+      } else if (
+        message.toLowerCase().includes("insufficient") ||
+        message.toLowerCase().includes("not enough")
+      ) {
         setReviveError(
           `Not enough SOL. You need ${REVIVE_COST_SOL} SOL plus a small network fee to revive your tree.`,
         );
-      } else if (isLikelyRpcFailure(message)) {
-        setReviveError(
-          "Network error. Could not reach Solana devnet. Please check your connection and try again.",
-        );
       } else {
         setReviveError(message);
+        Alert.alert("Revive Debug Error", message);
       }
     } finally {
       setIsReviving(false);
     }
   }, [
     publicKey,
-    authToken,
-    cluster,
     walletUriBase,
     setAuthorizationState,
     setLastTxSignature,
