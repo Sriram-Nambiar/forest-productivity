@@ -5,6 +5,7 @@ import '../src/polyfills';
 import { useLevelStore } from '../src/store/levelStore';
 import { useSessionStore } from '../src/store/sessionStore';
 import { useSettingsStore } from '../src/store/settingsStore';
+import { useTimerStore } from '../src/store/timerStore';
 import { useWalletStore } from '../src/store/walletStore';
 
 export default function RootLayout() {
@@ -12,14 +13,20 @@ export default function RootLayout() {
   const loadSessions = useSessionStore((s) => s.loadSessions);
   const loadWalletSettings = useWalletStore((s) => s.loadWalletSettings);
   const loadLevelData = useLevelStore((s) => s.loadLevelData);
+  const restoreSession = useTimerStore((s) => s.restoreSession);
   const darkMode = useSettingsStore((s) => s.darkMode);
 
   useEffect(() => {
-    loadSettings();
-    loadSessions();
-    loadWalletSettings();
-    loadLevelData();
-  }, [loadSettings, loadSessions, loadWalletSettings, loadLevelData]);
+    // Load all stores first, then restore any active timer session
+    Promise.all([
+      loadSettings(),
+      loadSessions(),
+      loadWalletSettings(),
+      loadLevelData(),
+    ]).then(() => {
+      restoreSession();
+    });
+  }, [loadSettings, loadSessions, loadWalletSettings, loadLevelData, restoreSession]);
 
   return (
     <>

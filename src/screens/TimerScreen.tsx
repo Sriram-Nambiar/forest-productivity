@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect } from "react";
+import React, { useCallback } from "react";
 import { Alert, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { DurationSelector } from "../components/DurationSelector";
@@ -27,15 +27,10 @@ export default function TimerScreen() {
     startTimer,
     pauseTimer,
     resumeTimer,
-    restoreSession,
     tree,
   } = useTimerStore();
 
   const darkMode = useSettingsStore((s) => s.darkMode);
-
-  useEffect(() => {
-    restoreSession();
-  }, [restoreSession]);
 
   const handleSelectDuration = useCallback(
     (minutes: number) => {
