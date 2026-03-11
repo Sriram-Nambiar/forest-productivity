@@ -1,4 +1,5 @@
-import React, { Component, type ReactNode } from 'react';
+import { router } from 'expo-router';
+import React, { Component, type ErrorInfo, type ReactNode } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { COLORS } from '../constants';
 
@@ -21,8 +22,23 @@ export class ErrorBoundary extends Component<Props, State> {
     return { hasError: true };
   }
 
+  componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
+    console.error(
+      '[ErrorBoundary] Caught error:',
+      error.message,
+      '\nComponent stack:',
+      errorInfo.componentStack,
+    );
+  }
+
   handleReset = () => {
     this.setState({ hasError: false });
+    // Navigate to the root route instead of re-rendering the broken child
+    try {
+      router.replace('/');
+    } catch {
+      // router may not be available if the error occurred during initial mount
+    }
   };
 
   render() {
