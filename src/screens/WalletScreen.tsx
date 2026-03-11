@@ -4,7 +4,7 @@ import {
 } from '@solana-mobile/mobile-wallet-adapter-protocol-web3js';
 import { LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js';
 import { router } from 'expo-router';
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -139,6 +139,15 @@ export default function WalletScreen() {
       setBalance(null);
     }
   }, [publicKey, cluster]);
+
+  // Auto-refresh balance when a new transaction signature appears (covers revive, reward, etc.)
+  useEffect(() => {
+    if (lastTxSignature && publicKey) {
+      // Small delay to let the transaction confirm on-chain
+      const timer = setTimeout(() => refreshBalance(), 2_000);
+      return () => clearTimeout(timer);
+    }
+  }, [lastTxSignature, publicKey, refreshBalance]);
 
   // ─── Send Reward Transaction ───
   const handleSendReward = useCallback(async () => {
